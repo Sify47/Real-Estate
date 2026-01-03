@@ -1,7 +1,6 @@
-streamlit>=1.28.0
-pandas>=2.1.0
-requests>=2.31.0
-beautifulsoup4>=4.12.2
-plotly>=5.17.0
-numpy>=1.24.3
-sqlite3  # مدمج مع بايثون، لا يحتاج تثبيت
+streamlit==1.28.0
+pandas==2.1.3
+requests==2.31.0
+beautifulsoup4==4.12.2
+plotly==5.18.0
+numpy==1.26.0
