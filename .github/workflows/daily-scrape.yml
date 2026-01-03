@@ -1,0 +1,29 @@
+name: Daily Auto-Scrape
+
+on:
+  schedule:
+    - cron: '0 8 * * *'  # الساعة 8 صباحًا كل يوم (توقيت UTC)
+  workflow_dispatch:  # للتنفيذ اليدوي
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        pip install requests beautifulsoup4 pandas
+    
+    - name: Run scraping script
+      env:
+        STREAMLIT_URL: ${{ secrets.STREAMLIT_URL }}
+      run: |
+        python scripts/daily_scrape.py
