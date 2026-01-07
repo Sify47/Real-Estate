@@ -1,6 +1,6 @@
-Last scraped: 2026-01-07 13:36:21
-New properties collected: 52
+Last scraped: 2026-01-07 14:21:57
+New properties collected: 48
 New properties added: 0
-Total properties: 2571
+Total properties: 2616
 Pages scraped: 2
 Status: Success
