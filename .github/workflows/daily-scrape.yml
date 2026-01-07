@@ -2,35 +2,60 @@ name: Daily Real Estate Scraping
 
 on:
   schedule:
-    # تشغيل كل يوم الساعة 4 فجراً (توقيت مصر)
     - cron: '0 2 * * *'  # 2 AM UTC = 4 AM Egypt Time
   workflow_dispatch:  # للتشغيل اليدوي
-  
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
     
+    permissions:
+      contents: write  # أضف هذه الصلاحية
+    
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
-      
+      with:
+        token: ${{ secrets.GH_TOKEN }}  # استخدم الـ Token هنا
+    
     - name: Set up Python
       uses: actions/setup-python@v4
-      with:
+      with: 
         python-version: '3.9'
         
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pandas numpy requests beautifulsoup4
+        pip install pandas numpy requests beautifulsoup4 lxml
         
     - name: Run scraping script
       run: python scrape_data.py
       
-    - name: Commit and push if changes
+    - name: Configure Git
       run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "github-actions@github.com"
+        
+    - name: Commit and push changes
+      env:
+        GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+      run: |
+        # تحقق من التغييرات
+        git status
+        
+        # أضف الملفات المعدلة
         git add Final1.csv scraping_metadata.txt
-        git commit -m "Auto-scrape: Update real estate data [$(date +'%Y-%m-%d')]" -a || echo "No changes to commit"
-        git push
+        
+        # commit إذا كان هناك تغييرات
+        if ! git diff --cached --quiet; then
+          git commit -m "Auto-scrape: Update data [$(date +'%Y-%m-%d %H:%M')]"
+          
+          # pull التغييرات أولاً
+          git pull origin main --rebase
+          
+          # push التغييرات
+          git push origin main
+          echo "✅ Changes pushed successfully"
+        else
+          echo "✅ No changes to commit"
+        fi
