@@ -1,10 +1,11 @@
-name: Daily Auto-Scrape
+name: Daily Real Estate Scraping
 
 on:
   schedule:
-    - cron: '0 8 * * *'  # الساعة 8 صباحًا كل يوم (توقيت UTC)
-  workflow_dispatch:  # للتنفيذ اليدوي
-
+    # تشغيل كل يوم الساعة 4 فجراً (توقيت مصر)
+    - cron: '0 2 * * *'  # 2 AM UTC = 4 AM Egypt Time
+  workflow_dispatch:  # للتشغيل اليدوي
+  
 jobs:
   scrape:
     runs-on: ubuntu-latest
@@ -12,18 +13,24 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
-    
+      
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10'
-    
+        python-version: '3.9'
+        
     - name: Install dependencies
       run: |
-        pip install requests beautifulsoup4 pandas
-    
+        python -m pip install --upgrade pip
+        pip install pandas numpy requests beautifulsoup4
+        
     - name: Run scraping script
-      env:
-        STREAMLIT_URL: ${{ secrets.STREAMLIT_URL }}
+      run: python scrape_data.py
+      
+    - name: Commit and push if changes
       run: |
-        python scripts/daily_scrape.py
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add Final1.csv scraping_metadata.txt
+        git commit -m "Auto-scrape: Update real estate data [$(date +'%Y-%m-%d')]" -a || echo "No changes to commit"
+        git push
