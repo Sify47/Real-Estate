@@ -50,12 +50,12 @@ jobs:
         if [ "${{ github.event.inputs.test_mode }}" = "yes" ]; then
           echo "🔧 Running in TEST mode (2 pages)"
           python -c "
-          import scrape_data_fixed
+          import scrape_data
           # تعديل لجمع صفحتين فقط
           " || echo "Test completed"
         else
           echo "🚀 Running in PRODUCTION mode"
-          python scrape_data_fixed.py
+          python scrape_data.py
         fi
         
     - name: Check for data loss
