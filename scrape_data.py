@@ -57,6 +57,7 @@ def scrape_bayut_page(page_url):
                 'Bedrooms': bedrooms,
                 'Bathrooms': bathrooms,
                 'Down_Payment': d,
+                'Scraped_Date': datetime.now().strftime('%Y-%m-%d')
             })
         except Exception as e:
             print(f"خطأ في معالجة كارد: {e}")
@@ -148,9 +149,80 @@ def clean_scraped_data(df_clean):
         print(f"Error in cleaning data: {e}")
         return df_clean
 
+def intelligent_deduplicate(new_df, old_df):
+    """إزالة تكرارات ذكية تحافظ على البيانات القديمة"""
+    
+    print(f"\n🔍 Starting intelligent deduplication...")
+    print(f"   New data: {len(new_df)} properties")
+    print(f"   Old data: {len(old_df)} properties")
+    
+    # إذا كان الـ old_df فارغاً، ارجع الـ new_df كما هو
+    if old_df.empty:
+        print("   No old data to compare with")
+        return new_df
+    
+    # 1. إنشاء مفتاح فريد لكل عقار
+    def create_key(row):
+        # استخدام عنوان ولقطة وسعر لإنشاء مفتاح
+        title = str(row['Title']).strip().lower() if 'Title' in row and pd.notna(row['Title']) else ''
+        location = str(row['Location']).strip().lower() if 'Location' in row and pd.notna(row['Location']) else ''
+        price = str(row['Price']) if 'Price' in row and pd.notna(row['Price']) else ''
+        
+        # أخذ أول 50 حرف من العنوان والموقع
+        title_key = title[:50]
+        location_key = location[:30]
+        
+        return f"{title_key}_{location_key}_{price}"
+    
+    # 2. إنشاء مفاتيح للبيانات القديمة والجديدة
+    print("   Creating unique keys...")
+    old_df = old_df.copy()
+    new_df = new_df.copy()
+    
+    old_df['_key'] = old_df.apply(create_key, axis=1)
+    new_df['_key'] = new_df.apply(create_key, axis=1)
+    
+    # 3. العثور على التكرارات
+    duplicate_keys = set(new_df['_key']).intersection(set(old_df['_key']))
+    
+    print(f"   Found {len(duplicate_keys)} potential duplicates")
+    
+    if duplicate_keys:
+        # 4. تصفية التكرارات من البيانات الجديدة
+        new_df_filtered = new_df[~new_df['_key'].isin(duplicate_keys)]
+        
+        # 5. إضافة التكرارات الجديدة فقط إذا كانت مختلفة بشكل كبير
+        kept_duplicates = 0
+        for key in duplicate_keys:
+            old_row = old_df[old_df['_key'] == key].iloc[0]
+            new_row = new_df[new_df['_key'] == key].iloc[0]
+            
+            # تحقق إذا كان هناك فرق كبير في السعر (>10%)
+            old_price = old_row['Price'] if 'Price' in old_row and pd.notna(old_row['Price']) else 0
+            new_price = new_row['Price'] if 'Price' in new_row and pd.notna(new_row['Price']) else 0
+            
+            if old_price > 0 and new_price > 0:
+                price_diff = abs((new_price - old_price) / old_price)
+                
+                # إذا كان الفرق في السعر أكثر من 10%، اعتبره عقاراً جديداً
+                if price_diff > 0.1:
+                    new_df_filtered = pd.concat([new_df_filtered, new_df[new_df['_key'] == key]], ignore_index=True)
+                    kept_duplicates += 1
+        
+        print(f"   Kept {kept_duplicates} duplicates with significant price changes")
+        
+        # إزالة العمود المؤقت
+        new_df_filtered = new_df_filtered.drop(columns=['_key'])
+    else:
+        new_df_filtered = new_df.drop(columns=['_key'])
+    
+    print(f"   Final new data after deduplication: {len(new_df_filtered)} properties")
+    
+    return new_df_filtered
+
 def main():
     print("=" * 60)
-    print("🚀 Starting automatic real estate scraping...")
+    print("🚀 Starting intelligent real estate scraping...")
     print(f"📅 Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
     
@@ -158,8 +230,8 @@ def main():
     base_url = "https://www.bayut.eg/en/alexandria/properties-for-sale/"
     all_properties = []
     
-    # جمع من 3 صفحات
-    for page_num in range(1, 4):
+    # جمع من صفحتين فقط لتجنب التحميل الزائد
+    for page_num in range(1, 3):
         if page_num == 1:
             page_url = base_url
         else:
@@ -182,79 +254,82 @@ def main():
         df_scraped = pd.DataFrame(all_properties)
         print(f"\n📊 Total NEW properties collected: {len(df_scraped)}")
         
-        # تنظيف البيانات الجديدة
+        # تنظيف البيانات
         df_cleaned = clean_scraped_data(df_scraped)
         
         if not df_cleaned.empty:
-            # قراءة البيانات القديمة من Final1.csv
+            # قراءة البيانات القديمة
             if os.path.exists('Final1.csv'):
                 try:
                     existing_df = pd.read_csv('Final1.csv')
-                    print(f"📁 Found existing data with {len(existing_df)} properties in Final1.csv")
+                    print(f"📁 Found existing Final1.csv with {len(existing_df)} properties")
                     
-                    # دمج البيانات الجديدة مع القديمة
-                    combined_df = pd.concat([existing_df, df_cleaned], ignore_index=True)
+                    # استخدام إزالة التكرارات الذكية
+                    df_unique_new = intelligent_deduplicate(df_cleaned, existing_df)
                     
-                    # إزالة التكرارات بناءً على معايير دقيقة
-                    # استخدم أعمدة أكثر لتحديد التكرارات بدقة
+                    # دمج البيانات القديمة مع الجديدة الفريدة فقط
+                    combined_df = pd.concat([existing_df, df_unique_new], ignore_index=True)
+                    
+                    # إزالة التكرارات النهائية (باستخدام معايير أكثر تحفظاً)
                     combined_df = combined_df.drop_duplicates(
-                        subset=['Title', 'Location', 'Price', 'PropertyType', 'Bedrooms', 'Area'], 
-                        keep='last'
+                        subset=['Title', 'Location', 'Price', 'PropertyType', 'Bedrooms'], 
+                        keep='first'  # احتفظ بالسجلات القديمة
                     )
                     
                     new_properties_added = len(combined_df) - len(existing_df)
                     print(f"🔄 After merging: {len(combined_df)} total properties")
                     print(f"➕ New properties added: {new_properties_added}")
                     
-                    # حفظ البيانات المدمجة في Final1.csv
+                    # إذا كان هناك نقص في البيانات، لا تحفظ
+                    if new_properties_added < -10:  # إذا فقدنا أكثر من 10 عقار
+                        print(f"⚠️ WARNING: Data loss detected! Keeping old file.")
+                        combined_df = existing_df  # استعادة البيانات القديمة
+                        new_properties_added = 0
+                    
+                    # حفظ البيانات
                     combined_df.to_csv('Final1.csv', index=False, encoding='utf-8')
                     print(f"💾 Saved {len(combined_df)} properties to Final1.csv")
                     
                     # حفظ metadata
+                    metadata = f"""Last scraped: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+New properties collected: {len(df_cleaned)}
+New properties added: {new_properties_added}
+Total properties: {len(combined_df)}
+Pages scraped: {min(page_num, 2)}
+Status: Success"""
+                    
                     with open('scraping_metadata.txt', 'w') as f:
-                        f.write(f"Last scraped: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                        f.write(f"New properties collected: {len(df_cleaned)}\n")
-                        f.write(f"New properties added: {new_properties_added}\n")
-                        f.write(f"Total properties in Final1.csv: {len(combined_df)}\n")
-                        f.write(f"Pages scraped: {min(page_num, 3)}\n")
+                        f.write(metadata)
                     
                     print("\n" + "=" * 60)
                     print("✅ Scraping completed successfully!")
                     print(f"📈 Data summary:")
                     print(f"   - Old data: {len(existing_df)} properties")
                     print(f"   - New data: {len(df_cleaned)} properties")
+                    print(f"   - Unique new: {len(df_unique_new)} properties")
                     print(f"   - Total now: {len(combined_df)} properties")
-                    print(f"   - Added today: {new_properties_added} properties")
+                    print(f"   - Net change: {new_properties_added} properties")
                     print("=" * 60)
                     
                     return True
                     
                 except Exception as e:
-                    print(f"❌ Error reading/writing Final1.csv: {e}")
-                    # إذا حدث خطأ، احفظ البيانات الجديدة فقط
-                    df_cleaned.to_csv('Final1.csv', index=False, encoding='utf-8')
-                    print(f"💾 Saved new data only to Final1.csv ({len(df_cleaned)} properties)")
-                    
-                    with open('scraping_metadata.txt', 'w') as f:
-                        f.write(f"Last scraped: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                        f.write(f"New properties: {len(df_cleaned)}\n")
-                        f.write(f"Note: Error merging with existing data\n")
-                    
-                    return True
+                    print(f"❌ Error processing files: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    return False
             else:
-                # إذا لم يوجد Final1.csv، احفظ البيانات الجديدة فقط
+                # إذا لم يوجد الملف، احفظ البيانات الجديدة
                 df_cleaned.to_csv('Final1.csv', index=False, encoding='utf-8')
                 print(f"💾 Created Final1.csv with {len(df_cleaned)} properties")
                 
-                with open('scraping_metadata.txt', 'w') as f:
-                    f.write(f"Last scraped: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                    f.write(f"Initial properties: {len(df_cleaned)}\n")
-                    f.write(f"File created: First run\n")
+                metadata = f"""Last scraped: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+New properties: {len(df_cleaned)}
+Total properties: {len(df_cleaned)}
+Status: First run - file created"""
                 
-                print("\n" + "=" * 60)
-                print("✅ First scraping completed!")
-                print(f"📁 Created Final1.csv with {len(df_cleaned)} properties")
-                print("=" * 60)
+                with open('scraping_metadata.txt', 'w') as f:
+                    f.write(metadata)
                 
                 return True
         else:
@@ -266,4 +341,4 @@ def main():
 
 if __name__ == "__main__":
     success = main()
-    exit(0 if success else 1)
+    sys.exit(0 if success else 1)
