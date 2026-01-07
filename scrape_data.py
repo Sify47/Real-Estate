@@ -212,7 +212,7 @@ def main():
     all_properties = []
 
     # جمع من 3 صفحات
-    for page_num in range(1, 11):
+    for page_num in range(1, 31):
         if page_num == 1:
             page_url = base_url
         else:
