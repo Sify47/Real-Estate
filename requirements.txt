@@ -5,3 +5,5 @@ numpy
 requests
 beautifulsoup4
 lxml
+sklearn
+scipy
