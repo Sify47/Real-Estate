@@ -1,4 +1,4 @@
-Last scraped: 2026-01-07 14:21:57
+Last scraped: 2026-01-07 14:53:31
 New properties collected: 48
 New properties added: 0
 Total properties: 2616
