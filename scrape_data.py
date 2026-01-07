@@ -261,6 +261,9 @@ def clean_data_step2(df_clean):
             df_clean["Down_Payment"] = df_clean["Down_Payment"].str.replace(
                 " 50 monthly / 1 year", "0", case=False, regex=False
             )
+            df_clean["Down_Payment"] = df_clean["Down_Payment"].str.replace(
+                "monthly / 1.5 years", "", case=False, regex=False
+            )
             for years in range(1, 13):
                 pattern = (
                     f"monthly / {years} years" if years > 1 else "monthly / 1 year"
