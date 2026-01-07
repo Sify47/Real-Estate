@@ -2,25 +2,35 @@ name: Daily Real Estate Scraping
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # 2 AM UTC = 4 AM Egypt Time
-  workflow_dispatch:  # للتشغيل اليدوي
+    - cron: '30 2 * * *'  # 2:30 AM UTC = 4:30 AM Egypt Time
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Run in test mode (2 pages only)'
+        required: false
+        default: 'no'
+        type: choice
+        options:
+          - yes
+          - no
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
     
     permissions:
-      contents: write  # أضف هذه الصلاحية
+      contents: write
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
       with:
-        token: ${{ secrets.GH_TOKEN }}  # استخدم الـ Token هنا
+        token: ${{ secrets.GH_TOKEN }}
+        fetch-depth: 0  # احضر كل التاريخ
     
     - name: Set up Python
       uses: actions/setup-python@v4
-      with: 
+      with:
         python-version: '3.9'
         
     - name: Install dependencies
@@ -28,34 +38,95 @@ jobs:
         python -m pip install --upgrade pip
         pip install pandas numpy requests beautifulsoup4 lxml
         
+    - name: Backup current data
+      run: |
+        if [ -f "Final1.csv" ]; then
+          cp Final1.csv Final1_backup_$(date +%Y%m%d_%H%M%S).csv
+          echo "✅ Backup created"
+        fi
+        
     - name: Run scraping script
-      run: python scrape_data.py
-      
+      run: |
+        if [ "${{ github.event.inputs.test_mode }}" = "yes" ]; then
+          echo "🔧 Running in TEST mode (2 pages)"
+          python -c "
+          import scrape_data_fixed
+          # تعديل لجمع صفحتين فقط
+          " || echo "Test completed"
+        else
+          echo "🚀 Running in PRODUCTION mode"
+          python scrape_data_fixed.py
+        fi
+        
+    - name: Check for data loss
+      run: |
+        if [ -f "scraping_metadata.txt" ]; then
+          echo "📊 Scraping Results:"
+          cat scraping_metadata.txt
+          
+          # تحقق من فقدان البيانات
+          if grep -q "Net change: -[0-9]*[1-9]" scraping_metadata.txt; then
+            echo "⚠️ WARNING: Data loss detected!"
+            echo "Restoring from backup..."
+            ls -la Final1_backup_*.csv | tail -1 | awk '{print $9}' | xargs -I {} cp {} Final1.csv
+          fi
+        fi
+        
     - name: Configure Git
       run: |
         git config --global user.name "GitHub Actions"
-        git config --global user.email "github-actions@github.com"
+        git config --global user.email "actions@github.com"
         
     - name: Commit and push changes
       env:
         GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
       run: |
-        # تحقق من التغييرات
-        git status
-        
-        # أضف الملفات المعدلة
-        git add Final1.csv scraping_metadata.txt
-        
-        # commit إذا كان هناك تغييرات
-        if ! git diff --cached --quiet; then
-          git commit -m "Auto-scrape: Update data [$(date +'%Y-%m-%d %H:%M')]"
+        # تفحص التغييرات
+        if git diff --name-only | grep -q "Final1.csv\|scraping_metadata.txt"; then
+          echo "📝 Changes detected"
           
-          # pull التغييرات أولاً
-          git pull origin main --rebase
+          git add Final1.csv scraping_metadata.txt
           
-          # push التغييرات
-          git push origin main
-          echo "✅ Changes pushed successfully"
+          # احصل على معلومات من metadata
+          if [ -f "scraping_metadata.txt" ]; then
+            NEW_PROPS=$(grep "New properties added:" scraping_metadata.txt | awk '{print $NF}')
+            TOTAL_PROPS=$(grep "Total properties:" scraping_metadata.txt | awk '{print $NF}')
+            COMMIT_MSG="Auto-scrape: Added $NEW_PROPS properties (Total: $TOTAL_PROPS) [$(date +'%Y-%m-%d %H:%M')]"
+          else
+            COMMIT_MSG="Auto-scrape: Update data [$(date +'%Y-%m-%d %H:%M')]"
+          fi
+          
+          git commit -m "$COMMIT_MSG"
+          
+          # pull أولاً
+          git pull origin main --rebase --strategy-option=theirs
+          
+          # push
+          if git push origin main; then
+            echo "✅ Successfully pushed changes"
+          else
+            echo "❌ Failed to push changes"
+            exit 1
+          fi
         else
           echo "✅ No changes to commit"
+        fi
+        
+    - name: Cleanup backups
+      run: |
+        # حذف النسخ الاحتياطية القديمة (احتفظ بـ 5 أحدث)
+        ls -t Final1_backup_*.csv 2>/dev/null | tail -n +6 | xargs rm -f || true
+        
+    - name: Create summary
+      run: |
+        echo "### 🎉 Scraping Completed" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -f "scraping_metadata.txt" ]; then
+          echo "**Results:**" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat scraping_metadata.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+        else
+          echo "**Status:** No new data collected" >> $GITHUB_STEP_SUMMARY
         fi
