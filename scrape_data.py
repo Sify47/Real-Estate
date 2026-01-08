@@ -394,7 +394,7 @@ def main():
     # إعدادات
     base_url = "https://www.bayut.eg/en/alexandria/properties-for-sale/"
     max_pages = 80  # عدد الصفحات المطلوب جمعها
-    output_path = "E:/PY/Real Estate/Final1.csv"  # مسار حفظ البيانات
+    output_path = "Final1.csv"  # مسار حفظ البيانات
 
     # جمع البيانات
     print(f"\n📥 جاري جمع البيانات من {max_pages} صفحات...")
