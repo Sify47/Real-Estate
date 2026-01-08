@@ -113,26 +113,42 @@ def clean_data_step1(df_clean):
     if "Location" not in df_clean.columns:
         return df_clean
 
-    # Split Location into parts and concatenate (drop original Location to avoid duplication)
+    # Split Location into parts and concatenate
     df_split = df_clean["Location"].str.split(",", expand=True).add_prefix("Location_")
     df_clean = pd.concat([df_clean.drop(columns=["Location"]), df_split], axis=1)
 
-    # Drop Location_2 if present (some rows may not have 3 parts)
-    if "Location_2" in df_clean.columns:
-        df_clean = df_clean.drop(columns=["Location_2"])
+    # التعامل مع التنسيقات المختلفة
+    num_columns = df_split.shape[1]
 
-    # Rename parts to meaningful names
-    if "Location_1" in df_clean.columns:
-        df_clean = df_clean.rename(columns={"Location_1": "State"})
-    else:
-        df_clean["State"] = np.nan
-
+    # دايماً نأخذ أول جزء كـ Location
     if "Location_0" in df_clean.columns:
-        df_clean = df_clean.rename(columns={"Location_0": "Location"})
+        location_value = df_split["Location_0"].str.strip()
+        df_clean["Location"] = location_value
     else:
         df_clean["Location"] = np.nan
 
-    # Normalize text values safely on the df_clean dataframe
+    # تحديد State بناءً على عدد الأجزاء
+    if num_columns >= 3:
+        # حالة 3 أجزاء: نأخذ الجزء الثاني
+        if "Location_1" in df_clean.columns:
+            df_clean["State"] = df_split["Location_1"].str.strip()
+        else:
+            df_clean["State"] = df_clean["Location"]  # إذا مش موجود، ناخد Location
+    elif num_columns >= 2:
+        # حالة جزئين: State تكون نفس Location
+        df_clean["State"] = df_clean["Location"]
+    elif num_columns >= 1:
+        # حالة جزء واحد: State تكون نفس Location
+        df_clean["State"] = df_clean["Location"]
+    else:
+        df_clean["State"] = np.nan
+
+    # حذف الأعمدة المؤقتة
+    for col in ["Location_0", "Location_1", "Location_2"]:
+        if col in df_clean.columns:
+            df_clean = df_clean.drop(columns=[col])
+
+    # Normalize text values
     if "State" in df_clean.columns:
         mask_state = df_clean["State"].notna()
         df_clean.loc[mask_state, "State"] = df_clean.loc[
@@ -141,25 +157,27 @@ def clean_data_step1(df_clean):
         df_clean.loc[mask_state, "State"] = df_clean.loc[
             mask_state, "State"
         ].str.replace("Borg al-Arab", "Borg El Arab", case=False, regex=False)
+        df_clean.loc[mask_state, "State"] = df_clean.loc[
+            mask_state, "State"
+        ].str.replace("Smoha", "Smouha", case=False, regex=False)
 
     if "Location" in df_clean.columns:
         mask_loc = df_clean["Location"].notna()
         df_clean.loc[mask_loc, "Location"] = df_clean.loc[
             mask_loc, "Location"
         ].str.replace("Smoha", "Smouha", case=False, regex=False)
-
+    df_clean["State"] = df_clean["State"].str.strip()
+    mask = df_clean["State"].str.contains("Alexandria", case=False, na=False)
+    df_clean.loc[mask, "State"] = df_clean.loc[mask, "Location"]
+    df_clean["State"] = df_clean["State"].fillna(df_clean["Location"])
     return df_clean
 
 
-# ...existing code...
 def clean_data_step2(df_clean):
-    """المرحلة الثانية من التنظيف (fixed .str accessor errors)"""
-    # Ensure 'State'/'Location' and other text columns are string dtype to safely use .str
-    import pandas as _pd
-
+    """المرحلة الثانية من التنظيف"""
     try:
-        # Cast relevant columns to pandas "string" dtype if they exist
-        for col in (
+        # 1. تأكد أن الأعمدة النصية هي string dtype
+        text_columns = [
             "Location",
             "State",
             "Bedrooms",
@@ -167,77 +185,55 @@ def clean_data_step2(df_clean):
             "Down_Payment",
             "Price",
             "Area",
-        ):
+        ]
+        for col in text_columns:
             if col in df_clean.columns:
                 df_clean[col] = df_clean[col].astype("string")
 
-        # Ensure 'Location' exists
-        if "Location" not in df_clean.columns:
-            return df_clean
-
-        # Split Location into parts and concatenate (drop original Location to avoid duplication)
-        df_clean_split = (
-            df_clean["Location"].str.split(",", expand=True).add_prefix("Location_")
-        )
-        df_clean = _pd.concat(
-            [df_clean.drop(columns=["Location"]), df_clean_split], axis=1
-        )
-
-        # Drop Location_2 if present (some rows may not have 3 parts)
-        if "Location_2" in df_clean.columns:
-            df_clean = df_clean.drop(columns=["Location_2"])
-
-        # Rename parts to meaningful names
-        if "Location_1" in df_clean.columns:
-            df_clean = df_clean.rename(columns={"Location_1": "State"})
-        else:
-            df_clean["State"] = _pd.NA
-
-        if "Location_0" in df_clean.columns:
-            df_clean = df_clean.rename(columns={"Location_0": "Location"})
-        else:
-            df_clean["Location"] = _pd.NA
-
-        # Normalize text values safely on the df_clean dataframe
+        # 2. تنظيف وتطبيع النصوص
         if "State" in df_clean.columns:
-            mask_state = df_clean["State"].notna()
-            df_clean.loc[mask_state, "State"] = df_clean.loc[
-                mask_state, "State"
-            ].str.replace("Saba Pasha", "Saba Basha", case=False, regex=False)
-            df_clean.loc[mask_state, "State"] = df_clean.loc[
-                mask_state, "State"
-            ].str.replace("Borg al-Arab", "Borg El Arab", case=False, regex=False)
+            df_clean["State"] = df_clean["State"].str.replace(
+                "Saba Pasha", "Saba Basha", case=False, regex=False
+            )
+            df_clean["State"] = df_clean["State"].str.replace(
+                "Borg al-Arab", "Borg El Arab", case=False, regex=False
+            )
+            df_clean["State"] = df_clean["State"].str.replace(
+                "Smoha", "Smouha", case=False, regex=False
+            )
 
         if "Location" in df_clean.columns:
-            mask_loc = df_clean["Location"].notna()
-            df_clean.loc[mask_loc, "Location"] = df_clean.loc[
-                mask_loc, "Location"
-            ].str.replace("Smoha", "Smouha", case=False, regex=False)
+            df_clean["Location"] = df_clean["Location"].str.replace(
+                "Smoha", "Smouha", case=False, regex=False
+            )
 
-        # Fixing 'Price' column type casting error
+        # 3. تنظيف Price
         if "Price" in df_clean.columns:
-            df_clean["Price"] = df_clean["Price"].str.replace(",", "").astype("int64")
+            df_clean["Price"] = df_clean["Price"].str.replace(",", "", regex=False)
+            df_clean["Price"] = pd.to_numeric(df_clean["Price"], errors="coerce")
 
-        # Change column type to object for column: 'Area'
+        # 4. تنظيف Area
         if "Area" in df_clean.columns:
-            df_clean["Area"] = df_clean["Area"].str.replace(",", "").astype("int")
+            df_clean["Area"] = df_clean["Area"].str.replace(",", "", regex=False)
+            df_clean["Area"] = pd.to_numeric(df_clean["Area"], errors="coerce")
 
-        # Bedrooms/Bathrooms replacements (safe because cast to string dtype above)
+        # 5. تنظيف Bedrooms
         if "Bedrooms" in df_clean.columns:
             df_clean["Bedrooms"] = df_clean["Bedrooms"].str.replace(
-                "+ Maid", " ", case=False, regex=False
+                "+ Maid", "", case=False, regex=False
             )
             df_clean["Bedrooms"] = df_clean["Bedrooms"].str.replace(
                 "+", "", case=False, regex=False
             )
             df_clean["Bedrooms"] = df_clean["Bedrooms"].str.replace(
-                "studio ", "1", case=False, regex=False
+                "studio", "1", case=False, regex=False
             )
             df_clean["Bedrooms"] = df_clean["Bedrooms"].str.replace(
                 ".0", "", case=False, regex=False
             )
-            df_clean = df_clean.astype({"Bedrooms": "int8"})
+            df_clean["Bedrooms"] = pd.to_numeric(df_clean["Bedrooms"], errors="coerce")
 
+        # 6. تنظيف Bathrooms
         if "Bathrooms" in df_clean.columns:
             df_clean["Bathrooms"] = df_clean["Bathrooms"].str.replace(
                 "+", "", case=False, regex=False
@@ -245,10 +241,13 @@ def clean_data_step2(df_clean):
             df_clean["Bathrooms"] = df_clean["Bathrooms"].str.replace(
                 ".0", "", case=False, regex=False
             )
-            df_clean = df_clean.astype({"Bathrooms": "int8"})
+            df_clean["Bathrooms"] = pd.to_numeric(
+                df_clean["Bathrooms"], errors="coerce"
+            )
 
-        # Down_Payment cleaning
+        # 7. تنظيف Down_Payment
         if "Down_Payment" in df_clean.columns:
+            df_clean["Down_Payment"] = df_clean["Down_Payment"].astype(str)
             df_clean["Down_Payment"] = df_clean["Down_Payment"].str.replace(
                 " EGP", "", case=False, regex=False
             )
@@ -261,9 +260,7 @@ def clean_data_step2(df_clean):
             df_clean["Down_Payment"] = df_clean["Down_Payment"].str.replace(
                 " 50 monthly / 1 year", "0", case=False, regex=False
             )
-            df_clean["Down_Payment"] = df_clean["Down_Payment"].str.replace(
-                "monthly / 1.5 years", "", case=False, regex=False
-            )
+
             for years in range(1, 13):
                 pattern = (
                     f"monthly / {years} years" if years > 1 else "monthly / 1 year"
@@ -271,12 +268,18 @@ def clean_data_step2(df_clean):
                 df_clean["Down_Payment"] = df_clean["Down_Payment"].str.replace(
                     pattern, "", case=False, regex=False
                 )
-            df_clean["Down_Payment"] = df_clean["Down_Payment"].str.replace(",", "")
-            df_clean["Down_Payment"] = df_clean["Down_Payment"].astype("int64")
 
-        # Calculate Price_Per_M
-        df_clean["Price_Per_M"] = df_clean["Price"] / df_clean["Area"]
-        df_clean = df_clean.round({"Price_Per_M": 2})
+            df_clean["Down_Payment"] = df_clean["Down_Payment"].str.replace(
+                ",", "", regex=False
+            )
+            df_clean["Down_Payment"] = pd.to_numeric(
+                df_clean["Down_Payment"], errors="coerce"
+            ).fillna(0)
+
+        # 8. حساب Price_Per_M
+        if "Price" in df_clean.columns and "Area" in df_clean.columns:
+            df_clean["Price_Per_M"] = df_clean["Price"] / df_clean["Area"]
+            df_clean["Price_Per_M"] = df_clean["Price_Per_M"].round(2)
 
         return df_clean
 
@@ -286,9 +289,6 @@ def clean_data_step2(df_clean):
 
         traceback.print_exc()
         return df_clean
-
-
-# ...existing code...
 
 
 def process_and_save_data(df_raw, output_path):
@@ -304,20 +304,16 @@ def process_and_save_data(df_raw, output_path):
 
     # إزالة الصفوف الفارغة
     initial_count = len(df1)
-    df1.dropna(inplace=True)
+    required_columns = ["Location", "State", "Price", "Area"]
+    for col in required_columns:
+        if col in df1.columns:
+            df1 = df1[df1[col].notna() & (df1[col] != "")]
+
     df1.reset_index(drop=True, inplace=True)
     print(f"✅ تمت إزالة {initial_count - len(df1)} صف فارغ")
 
-    # تنظيف إضافي للموقع
+    # تنظيف إضافي
     df_clean = df1.copy()
-    df_clean["State"] = df_clean["State"].str.strip()
-
-    # تصحيح البيانات إذا كانت State تحتوي على "Alexandria"
-    mask = df_clean["State"].str.contains("Alexandria", case=False, na=False)
-    df_clean.loc[mask, "State"] = df_clean.loc[mask, "Location"]
-    df_clean["State"] = df_clean["State"].fillna(df_clean["Location"])
-
-    # تنظيف النصوص
     df_clean["State"] = df_clean["State"].str.strip()
     df_clean["Location"] = df_clean["Location"].str.strip()
 
@@ -331,8 +327,18 @@ def process_and_save_data(df_raw, output_path):
     # المرحلة الثانية من التنظيف
     df_clean = clean_data_step2(df_clean)
 
+    # عرض عينة
+    print("\n🔍 عينة من البيانات بعد التنظيف النهائي:")
+    final_sample = df_clean[
+        ["Location", "State", "Price", "Area", "Payment_Method"]
+    ].head(10)
+    for idx, row in final_sample.iterrows():
+        print(
+            f"  Location: '{row['Location']}', State: '{row['State']}', "
+            f"Price: {row['Price']:,}, Area: {row['Area']}, Payment: {row['Payment_Method']}"
+        )
+
     # إضافة تاريخ الجمع
-    # df_clean["Scraped_Date"] = datetime.now().strftime("%Y-%m-%d")
 
     # قراءة البيانات القديمة إذا وجدت
     if os.path.exists(output_path):
@@ -345,7 +351,15 @@ def process_and_save_data(df_raw, output_path):
 
             # إزالة التكرارات
             initial_combined = len(df_combined)
-            df_combined.drop_duplicates(inplace=True)
+
+            # تعريف الأعمدة للكشف عن التكرارات
+            duplicate_cols = (
+                ["Link"]
+                if "Link" in df_combined.columns
+                else ["Location", "State", "Price", "Area"]
+            )
+            df_combined.drop_duplicates(subset=duplicate_cols, inplace=True)
+
             duplicates_removed = initial_combined - len(df_combined)
 
             if duplicates_removed > 0:
@@ -379,8 +393,8 @@ def main():
 
     # إعدادات
     base_url = "https://www.bayut.eg/en/alexandria/properties-for-sale/"
-    max_pages = 35  # عدد الصفحات المطلوب جمعها
-    output_path = "Final1.csv"  # مسار حفظ البيانات
+    max_pages = 80  # عدد الصفحات المطلوب جمعها
+    output_path = "E:/PY/Real Estate/Final1.csv"  # مسار حفظ البيانات
 
     # جمع البيانات
     print(f"\n📥 جاري جمع البيانات من {max_pages} صفحات...")
