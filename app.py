@@ -111,7 +111,7 @@ def load_data():
                                     break
                     except:
                         pass
-                        
+                df = df.dropna()
                 return df
         
         # ثالثاً: بيانات تجريبية
