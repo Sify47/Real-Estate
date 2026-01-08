@@ -379,7 +379,7 @@ def main():
 
     # إعدادات
     base_url = "https://www.bayut.eg/en/alexandria/properties-for-sale/"
-    max_pages = 15  # عدد الصفحات المطلوب جمعها
+    max_pages = 35  # عدد الصفحات المطلوب جمعها
     output_path = "Final1.csv"  # مسار حفظ البيانات
 
     # جمع البيانات
