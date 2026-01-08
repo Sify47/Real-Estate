@@ -280,7 +280,7 @@ def clean_data_step2(df_clean):
         if "Price" in df_clean.columns and "Area" in df_clean.columns:
             df_clean["Price_Per_M"] = df_clean["Price"] / df_clean["Area"]
             df_clean["Price_Per_M"] = df_clean["Price_Per_M"].round(2)
-
+        df_clean = df_clean.dropna()
         return df_clean
 
     except Exception as e:
