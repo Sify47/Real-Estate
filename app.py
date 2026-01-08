@@ -8,7 +8,7 @@ from io import StringIO
 
 # إعدادات الصفحة
 st.set_page_config(
-    page_title="🏠 Real Estate Egypt",
+    page_title="Real Estate",
     page_icon="🏠",
     layout="wide"
 )
@@ -142,7 +142,7 @@ if 'last_update' not in st.session_state:
     st.session_state['last_update'] = "Unknown"
 
 # العنوان الرئيسي
-st.markdown('<h1 class="main-title">🏠 Real Estate Dashboard - مصر</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-title">🏠 Real Estate Dashboard</h1>', unsafe_allow_html=True)
 
 # تبويبات
 tab1, tab2 = st.tabs(["📊 Dashboard", "ℹ️ About & Updates"])
