@@ -239,7 +239,8 @@ with tab1:
     
     # ===== CHARTS =====
     st.subheader("📈 Analytics")
-    
+    fig7 = px.violin(filtered_df, "PropertyType", "Price")
+    st.plotly_chart(fig7, use_container_width=True)
     # Chart 1: توزيع العقارات حسب المدينة
     if not filtered_df.empty and 'State' in filtered_df.columns:
         fig1 = px.bar(
