@@ -524,6 +524,7 @@ def process_and_save_data(df_raw, output_path):
                 )
                 df_combined = df_combined.dropna()
                 df_combined = df_combined.reset_index(drop=True)
+                df_combined = df_combined.astype({'Bedrooms': 'int' , 'Down_Payment': 'int' , 'Bathrooms': 'int'})
                 duplicates_removed = initial_combined - len(df_combined)
                 if duplicates_removed > 0:
                     print(f"🔄 تمت إزالة {duplicates_removed} عقار مكرر")
