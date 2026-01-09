@@ -464,7 +464,7 @@ with tab1:  # Dashboard الأساسي
     # Chart 1: توزيع العقارات حسب المدينة
     if not filtered_df.empty and "State" in filtered_df.columns:
         fig1 = px.bar(
-            filtered_df["State"].value_counts().reset_index(),
+            filtered_df["State"].value_counts().reset_index().head(20),
             x="State",
             y="count",
             title="Properties Distribution by City",
