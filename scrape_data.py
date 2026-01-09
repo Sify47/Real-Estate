@@ -560,8 +560,8 @@ def main():
     )
     bayut_url = "https://www.bayut.eg/en/alexandria/properties-for-sale/"
 
-    propertyfinder_pages = 3
-    bayut_pages = 3
+    propertyfinder_pages = 40
+    bayut_pages = 40
     output_path = "Final1.csv"
 
     # جمع البيانات من PropertyFinder
