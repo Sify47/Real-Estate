@@ -12,7 +12,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 # إعدادات الصفحة
-st.set_page_config(page_title="🏠 Real Estate Egypt AI", page_icon="🏠", layout="wide")
+st.set_page_config(page_title="Real Estate Egypt", page_icon="🏠", layout="wide")
 
 # CSS مخصص
 st.markdown(
@@ -299,7 +299,7 @@ if "last_update" not in st.session_state:
 
 # العنوان الرئيسي
 st.markdown(
-    '<h1 class="main-title">🏠 Real Estate AI Dashboard - مصر</h1>',
+    '<h1 class="main-title">Real Estate Dashboard/h1>',
     unsafe_allow_html=True,
 )
 
