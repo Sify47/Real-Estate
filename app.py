@@ -12,7 +12,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 # إعدادات الصفحة
-st.set_page_config(page_title="Real Estate Egypt", page_icon="🏠", layout="wide")
+st.set_page_config(page_title="🏠 Real Estate Egypt AI", page_icon="🏠", layout="wide")
 
 # CSS مخصص
 st.markdown(
@@ -154,95 +154,6 @@ def load_data():
         return pd.DataFrame()
 
 
-# ========== PRICE PREDICTION FUNCTIONS ==========
-def train_price_model(df):
-    """تدريب نموذج توقع الأسعار"""
-    try:
-        features = ["Area", "Bedrooms", "Bathrooms"]
-        target = "Price"
-
-        available_features = [f for f in features if f in df.columns]
-
-        if len(available_features) < 2 or target not in df.columns:
-            return None
-
-        df_clean = df.dropna(subset=available_features + [target])
-
-        if len(df_clean) < 5:
-            return None
-
-        X = df_clean[available_features]
-        y = df_clean[target]
-
-        model = LinearRegression()
-        model.fit(X, y)
-
-        return model, available_features
-    except:
-        return None
-
-
-def predict_property_price(model, features, area, bedrooms, bathrooms):
-    """توقع سعر عقار"""
-    try:
-        input_data = pd.DataFrame(
-            [{"Area": area, "Bedrooms": bedrooms, "Bathrooms": bathrooms}]
-        )
-
-        predicted_price = model.predict(input_data[features])[0]
-        return max(0, float(predicted_price))
-    except:
-        return None
-
-
-# ========== RECOMMENDATION FUNCTIONS ==========
-def prepare_recommendation_data(df):
-    """تحضير بيانات التوصيات"""
-    df_copy = df.copy()
-
-    if "Combined_Features" not in df_copy.columns:
-        df_copy["Combined_Features"] = ""
-
-        if "PropertyType" in df_copy.columns:
-            df_copy["Combined_Features"] += df_copy["PropertyType"].fillna("") + " "
-
-        if "Location" in df_copy.columns:
-            df_copy["Combined_Features"] += df_copy["Location"].fillna("") + " "
-
-        if "State" in df_copy.columns:
-            df_copy["Combined_Features"] += df_copy["State"].fillna("") + " "
-
-        if "Bedrooms" in df_copy.columns:
-            df_copy["Combined_Features"] += df_copy["Bedrooms"].astype(str) + " غرف "
-
-        if "Price" in df_copy.columns:
-            price_quantiles = pd.qcut(
-                df_copy["Price"], 4, labels=["رخيص", "متوسط", "غالي", "فاخر"]
-            )
-            df_copy["Combined_Features"] += price_quantiles.astype(str) + " "
-
-    return df_copy
-
-
-def get_recommendations(df, property_id, n=5):
-    """الحصول على توصيات"""
-    try:
-        df_prepared = prepare_recommendation_data(df)
-
-        tfidf = TfidfVectorizer(stop_words=None)
-        tfidf_matrix = tfidf.fit_transform(df_prepared["Combined_Features"])
-
-        cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
-
-        sim_scores = list(enumerate(cosine_sim[property_id]))
-        sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)[1 : n + 1]
-
-        property_indices = [i[0] for i in sim_scores]
-
-        return df_prepared.iloc[property_indices]
-    except:
-        return pd.DataFrame()
-
 
 # ========== MARKET INSIGHTS FUNCTIONS ==========
 def calculate_market_insights(df):
@@ -299,7 +210,7 @@ if "last_update" not in st.session_state:
 
 # العنوان الرئيسي
 st.markdown(
-    '<h1 class="main-title">Real Estate Dashboard</h1>',
+    '<h1 class="main-title">🏠 Real Estate AI Dashboard - مصر</h1>',
     unsafe_allow_html=True,
 )
 
@@ -307,8 +218,7 @@ st.markdown(
 tab1, tab2 = st.tabs(
     [
         "📊 Dashboard",
-        # "💰 Price Predictor",
-        # "🤖 AI Recommendations",
+
         "📈 Market Insights",
     ]
 )
@@ -324,6 +234,19 @@ with tab1:  # Dashboard الأساسي
         else ["All"]
     )
     selected_type = st.sidebar.selectbox("Property Type", property_types)
+    bed_types = (
+        ["All"] + sorted(df["Bedrooms"].dropna().unique().tolist())
+        if "Bedrooms" in df.columns
+        else ["All"]
+    )
+    bed_types = st.sidebar.selectbox("Bedrooms", bed_types)
+
+    Bathrooms_types = (
+        ["All"] + sorted(df["Bathrooms"].dropna().unique().tolist())
+        if "Bathrooms" in df.columns
+        else ["All"]
+    )
+    Bathrooms_types = st.sidebar.selectbox("Bathrooms", Bathrooms_types)
     # فلتر النوع
     view_types = (
         ["All"] + sorted(view)
@@ -377,6 +300,12 @@ with tab1:  # Dashboard الأساسي
 
     if selected_city != "All" and "State" in filtered_df.columns:
         filtered_df = filtered_df[filtered_df["State"] == selected_city]
+
+    if bed_types != "All" and "Bedrooms" in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df["Bedrooms"] == bed_types]
+
+    if Bathrooms_types != "All" and "Bathrooms" in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df["Bathrooms"] == Bathrooms_types]
 
     if selected_type != "All" and "PropertyType" in filtered_df.columns:
         filtered_df = filtered_df[filtered_df["PropertyType"] == selected_type]
@@ -565,8 +494,6 @@ with tab1:  # Dashboard الأساسي
             )
             st.plotly_chart(fig3, use_container_width=True)
 
-    
-
     # ===== DATA TABLE =====
     st.subheader("📋 Property List")
 
@@ -614,146 +541,6 @@ with tab1:  # Dashboard الأساسي
         )
     else:
         st.info("No properties match your filters. Try adjusting them.")
-
-# with tab2:  # Price Predictor
-#     st.subheader("💰 AI Price Predictor")
-
-#     col1, col2 = st.columns([2, 1])
-
-#     with col1:
-#         st.write(
-#             """
-#         ### توقع سعر العقار
-
-#         أدخل مواصفات العقار للحصول على تقدير للسعر المتوقع:
-#         """
-#         )
-
-#         area = st.number_input(
-#             "المساحة (م²)", min_value=50, max_value=1000, value=120, step=10
-#         )
-#         bedrooms = st.selectbox("عدد الغرف", [1, 2, 3, 4, 5, 6], index=2)
-#         bathrooms = st.selectbox("عدد الحمامات", [1, 2, 3, 4], index=1)
-
-#         if "Location" in df.columns:
-#             locations = sorted(df["State"].dropna().unique())
-#             selected_location = st.selectbox("المنطقة", ["عام"] + locations)
-#         else:
-#             selected_location = None
-
-#         if st.button("🔮 توقع السعر", use_container_width=True):
-#             with st.spinner("جاري تحليل البيانات وتوقع السعر..."):
-#                 model_info = train_price_model(df)
-
-#                 if model_info:
-#                     model, features = model_info
-#                     predicted_price = predict_property_price(
-#                         model, features, area, bedrooms, bathrooms
-#                     )
-
-#                     if predicted_price:
-#                         st.markdown(
-#                             f'<div class="prediction-card">', unsafe_allow_html=True
-#                         )
-#                         st.metric("💰 السعر المتوقع", f"{predicted_price:,.0f} EGP")
-#                         st.markdown("</div>", unsafe_allow_html=True)
-
-#                         # مقارنة مع المتوسط
-#                         if "Price_Per_M" in df.columns:
-#                             avg_price_m2 = df["Price_Per_M"].mean()
-#                             avg_price = area * avg_price_m2
-#                             diff = predicted_price - avg_price
-#                             diff_percent = (
-#                                 (diff / avg_price) * 100 if avg_price > 0 else 0
-#                             )
-
-#                             st.info(
-#                                 f"""
-#                             **المقارنة مع المتوسط:**
-#                             - متوسط سعر المتر: {avg_price_m2:,.0f} EGP
-#                             - السعر المتوقع للمساحة: {avg_price:,.0f} EGP
-#                             - الفرق: {diff:,.0f} EGP ({diff_percent:+.1f}%)
-#                             """
-#                             )
-#                     else:
-#                         st.error("تعذر توقع السعر. حاول مرة أخرى.")
-#                 else:
-#                     st.warning("لا توجد بيانات كافية للتدريب. أضف المزيد من العقارات.")
-
-#     with col2:
-
-#         st.write("### 📊 إحصائيات السوق")
-#         if len(df) > 0:
-#             if "Price" in df.columns:
-#                 st.metric("متوسط السعر", f"{df['Price'].mean():,.0f} EGP")
-#             if "Price_Per_M" in df.columns:
-#                 st.metric("متوسط سعر المتر", f"{df['Price_Per_M'].mean():,.0f} EGP")
-#             if "Area" in df.columns:
-#                 st.metric("متوسط المساحة", f"{df['Area'].mean():.0f} م²")
-
-# with tab3:  # AI Recommendations
-#     st.subheader("🤖 AI Property Recommendations")
-
-#     if len(df) > 0:
-#         # اختيار عقار للبدء
-#         property_options = []
-#         if "Title" in df.columns:
-#             for idx, row in df.head(50).iterrows():  # عرض أول 50 عقار فقط للسرعة
-#                 title = row["Title"] if pd.notna(row["Title"]) else f"Property #{idx}"
-#                 location = (
-#                     row["Location"]
-#                     if "Location" in row and pd.notna(row["Location"])
-#                     else ""
-#                 )
-#                 price = row["Price"] if "Price" in row and pd.notna(row["Price"]) else 0
-#                 property_options.append(
-#                     (idx, f"{title} - {location} - {price:,.0f} EGP")
-#                 )
-
-#         if property_options:
-#             selected_property_idx = st.selectbox(
-#                 "اختر عقاراً للعثور على مشابهاته",
-#                 [f"#{idx}: {text}" for idx, text in property_options],
-#             )
-
-#             # استخراج ID العقار المختار
-#             try:
-#                 property_id = int(selected_property_idx.split(":")[0].replace("#", ""))
-#             except:
-#                 property_id = 0
-
-#             if st.button("🔍 ابحث عن عقارات مشابهة", use_container_width=True):
-#                 with st.spinner("جاري البحث عن عقارات مشابهة..."):
-#                     recommendations = get_recommendations(df, property_id, n=5)
-
-#                     if len(recommendations) > 0:
-#                         st.success(f"✅ وجدنا {len(recommendations)} عقاراً مشابهاً")
-
-#                         for idx, row in recommendations.iterrows():
-#                             with st.expander(
-#                                 f"🏠 {row.get('Title', f'عقار #{idx}')}", expanded=False
-#                             ):
-#                                 col_a, col_b = st.columns(2)
-
-#                                 with col_a:
-#                                     if "Price" in row:
-#                                         st.metric("السعر", f"{row['Price']:,.0f} EGP")
-#                                     if "Area" in row:
-#                                         st.metric("المساحة", f"{row['Area']} م²")
-
-#                                 with col_b:
-#                                     if "Location" in row:
-#                                         st.write(f"**الموقع:** {row['Location']}")
-#                                     if "Bedrooms" in row:
-#                                         st.write(f"**الغرف:** {row['Bedrooms']}")
-#                                     if "PropertyType" in row:
-#                                         st.write(f"**النوع:** {row['PropertyType']}")
-#                     else:
-#                         st.info("لم يتم العثور على عقارات مشابهة. حاول مع عقار آخر.")
-#         else:
-#             st.info("أضف بيانات للعقارات لعرض التوصيات.")
-#     else:
-#         st.info("لا توجد بيانات لعرض التوصيات.")
 
 with tab2:  # Market Insights
     st.subheader("📈 Market Insights & Analytics")
@@ -810,14 +597,6 @@ with tab2:  # Market Insights
                 for area, price in insights["affordable_areas"].items():
                     st.write(f"**{area}:** {price:,.0f} EGP/م²")
 
-        # avg_price = (
-        #     filtered_df.groupby(["State", "Location"])["Price"].mean().reset_index()
-        # )
-        # fig11 = px.treemap(
-        #     avg_price, path=["State", "Location"], values="Price" , title="متوسط السعر حسب المنطقة"
-        # ).update_layout(margin=dict(t=20, l=25, r=25, b=20))
-        # st.plotly_chart(fig11, use_container_width=True)
-        
         avg_price1 = (
             filtered_df.groupby(["State", "Location"])["Price_Per_M"]
             .mean()
