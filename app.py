@@ -299,7 +299,7 @@ if "last_update" not in st.session_state:
 
 # العنوان الرئيسي
 st.markdown(
-    '<h1 class="main-title">Real Estate Dashboard/h1>',
+    '<h1 class="main-title">Real Estate Dashboard</h1>',
     unsafe_allow_html=True,
 )
 
