@@ -2,19 +2,17 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 import requests
 from io import StringIO
 import numpy as np
-from sklearn.linear_model import LinearRegression
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
-# إعدادات الصفحة
-st.set_page_config(page_title="🏠 Real Estate Egypt AI", page_icon="🏠", layout="wide")
+st.set_page_config(page_title="Real Estate Egypt", page_icon="🏠", layout="wide")
 
-# CSS مخصص
 st.markdown(
     """
 <style>
@@ -31,69 +29,22 @@ st.markdown(
         color: white;
         margin: 10px 0;
     }
-    .stButton>button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        border-radius: 5px;
-        padding: 10px 24px;
-        font-weight: bold;
-    }
-    .stButton>button:hover {
-        background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%);
-    }
-    .update-info {
-        background-color: #e8f4fd;
-        padding: 15px;
-        border-radius: 8px;
-        margin: 10px 0;
-        border-left: 5px solid #2196F3;
-    }
-    .github-badge {
-        display: inline-block;
-        background-color: #24292e;
-        color: white;
-        padding: 5px 10px;
-        border-radius: 5px;
-        font-size: 0.8em;
-        margin: 2px;
-    }
-    .prediction-card {
-        background: linear-gradient(135deg, #4CAF50 0%, #8BC34A 100%);
-        padding: 20px;
-        border-radius: 10px;
-        color: white;
-        margin: 10px 0;
-    }
-    .recommendation-card {
-        border: 1px solid #ddd;
-        border-radius: 10px;
-        padding: 15px;
-        margin: 10px 0;
-        background-color: #f9f9f9;
-    }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
 
-# تحميل البيانات مع cache
-@st.cache_data(ttl=300)  # تحديث كل 5 دقائق
+@st.cache_data(ttl=300)
 def load_data():
-    """تحميل البيانات من GitHub أو ملف محلي"""
     try:
-        # أولاً: محاولة تحميل من GitHub RAW URL
         try:
             github_username = "Sify47"
             github_repo = "Real-Estate"
             github_raw_url = f"https://raw.githubusercontent.com/{github_username}/{github_repo}/main/Final1.csv"
-
             response = requests.get(github_raw_url, timeout=10)
             if response.status_code == 200:
                 df = pd.read_csv(StringIO(response.text))
-
-                # محاولة تحميل metadata
                 try:
                     metadata_url = f"https://raw.githubusercontent.com/{github_username}/{github_repo}/main/scraping_metadata.txt"
                     metadata_response = requests.get(metadata_url, timeout=5)
@@ -107,16 +58,11 @@ def load_data():
                                 break
                 except:
                     pass
-
                 return df
         except Exception as e:
             st.sidebar.warning(f"⚠️ Could not load from GitHub: {str(e)[:100]}")
-
-        # ثانياً: محاولة تحميل من ملف محلي
         if os.path.exists("Final1.csv") and os.path.getsize("Final1.csv") > 0:
             df = pd.read_csv("Final1.csv")
-
-            # تحميل metadata محلي
             if os.path.exists("scraping_metadata.txt"):
                 try:
                     with open("scraping_metadata.txt", "r") as f:
@@ -129,10 +75,7 @@ def load_data():
                                 break
                 except:
                     pass
-
             return df
-
-        # ثالثاً: بيانات تجريبية
         return pd.DataFrame(
             {
                 "Title": ["Sample Property 1", "Sample Property 2"],
@@ -148,22 +91,15 @@ def load_data():
                 "Down_Payment": [0, 500000],
             }
         )
-
     except Exception as e:
         st.sidebar.error(f"❌ Error loading data: {str(e)[:100]}")
         return pd.DataFrame()
 
 
-
-# ========== MARKET INSIGHTS FUNCTIONS ==========
 def calculate_market_insights(df):
-    """حساب تحليلات السوق"""
     insights = {}
-
     if len(df) == 0:
         return insights
-
-    # إحصائيات الأسعار
     if "Price" in df.columns:
         insights["price_stats"] = {
             "mean": df["Price"].mean(),
@@ -171,63 +107,331 @@ def calculate_market_insights(df):
             "min": df["Price"].min(),
             "max": df["Price"].max(),
         }
-
-    # تحليل سعر المتر
     if "Price_Per_M" in df.columns:
         insights["price_per_m_stats"] = {
             "mean": df["Price_Per_M"].mean(),
             "median": df["Price_Per_M"].median(),
         }
-
-    # المناطق الأغلى
     if "Location" in df.columns and "Price_Per_M" in df.columns:
         location_prices = (
             df.groupby("Location")["Price_Per_M"].mean().sort_values(ascending=False)
         )
         insights["expensive_areas"] = location_prices.head(5).to_dict()
         insights["affordable_areas"] = location_prices.tail(5).to_dict()
-
-    # توزيع أنواع العقارات
     if "PropertyType" in df.columns:
         property_dist = df["PropertyType"].value_counts(normalize=True) * 100
         insights["property_distribution"] = property_dist.to_dict()
-
-    # نسبة التقسيط
     if "Payment_Method" in df.columns:
         payment_dist = df["Payment_Method"].value_counts(normalize=True) * 100
         insights["payment_distribution"] = payment_dist.to_dict()
-
     return insights
 
 
-# ========== MAIN APPLICATION ==========
-# تحميل البيانات
-df = load_data()
+def create_treemap_data(filtered_df):
+    # 1. تحضير البيانات الأساسية للـ treemap
+    avg_price1 = (
+        filtered_df.groupby(["State", "Location"])["Price_Per_M"].mean().reset_index()
+    )
+    stats_df = (
+        filtered_df.groupby(["State", "Location"])
+        .agg({"Price_Per_M": ["mean", "count", "std"], "Price": "mean", "Area": "mean"})
+        .reset_index()
+    )
+    stats_df.columns = [
+        "_".join(col).strip("_") if col[1] else col[0]
+        for col in stats_df.columns.values
+    ]
+    avg_price1 = avg_price1.merge(
+        stats_df[
+            [
+                "State",
+                "Location",
+                "Price_Per_M_count",
+                "Price_Per_M_std",
+                "Price_mean",
+                "Area_mean",
+            ]
+        ],
+        on=["State", "Location"],
+        how="left",
+    )
+    avg_price1 = avg_price1.rename(
+        columns={
+            "Price_Per_M": "Price_Per_M_mean",
+            "Price_mean": "Avg_Price",
+            "Area_mean": "Avg_Area",
+            "Price_Per_M_count": "Property_Count",
+            "Price_Per_M_std": "Price_Std",
+        }
+    )
 
-# إعداد session state
+    # 2. تحويل البيانات النصية إلى رقمية للـ ML
+    # إنشاء نسخة من البيانات للتحليل
+    ml_df = filtered_df.copy()
+
+    # تحويل الأعمدة النصية إلى رقمية
+    if "Payment_Method" in ml_df.columns:
+        # تحويل Payment_Method إلى 0 و 1 (أو أكثر إذا كان هناك خيارات متعددة)
+        ml_df["Payment_Code"] = (
+            ml_df["Payment_Method"]
+            .map(
+                {
+                    "Cash": 0,
+                    "Installments": 1,
+                    "نقدي": 0,  # للغة العربية
+                    "تقسيط": 1,  # للغة العربية
+                }
+            )
+            .fillna(0)
+        )  # افتراضي نقدي
+
+    if "PropertyType" in ml_df.columns:
+        # تحويل نوع العقار إلى كود رقمية
+        property_types = ml_df["PropertyType"].unique()
+        property_map = {pt: i for i, pt in enumerate(property_types)}
+        ml_df["PropertyType_Code"] = ml_df["PropertyType"].map(property_map)
+
+    # 3. اختيار الميزات الرقمية فقط
+    numeric_features = []
+    for col in ["Area", "Bedrooms", "Bathrooms", "Price_Per_M", "Down_Payment"]:
+        if col in ml_df.columns:
+            numeric_features.append(col)
+
+    if "Payment_Code" in ml_df.columns:
+        numeric_features.append("Payment_Code")
+    if "PropertyType_Code" in ml_df.columns:
+        numeric_features.append("PropertyType_Code")
+
+    # 4. التأكد من عدم وجود قيم مفقودة
+    ml_df = ml_df[numeric_features + ["Price"]].dropna()
+
+    # 5. التأكد من وجود بيانات كافية
+    if len(ml_df) < 10:
+        print("⚠️ Not enough data for ML model")
+        # استخدام الطريقة التقليدية
+        avg_price1["Fair_Price"] = (
+            avg_price1["Price_Per_M_mean"] * avg_price1["Avg_Area"]
+        )
+    else:
+        # 6. تقسيم البيانات
+        X = ml_df[numeric_features]
+        y = ml_df["Price"]
+
+        # 7. تدريب النموذج
+        try:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=45
+            )
+
+            rf_model = RandomForestRegressor(
+                n_estimators=125,  # قلل عدد الأشجار للسرعة
+                max_depth=15,
+                random_state=47,
+                n_jobs=-1,  # استخدام جميع الأنوية
+            )
+            rf_model.fit(X_train, y_train)
+
+            # 8. التنبؤ بالسعر العادل لكل منطقة
+            # إنشاء بيانات لكل منطقة للتنبؤ
+            for idx, row in avg_price1.iterrows():
+                # إنشاء نموذج افتراضي للمنطقة
+                area_data = pd.DataFrame(
+                    [
+                        {
+                            "Area": row["Avg_Area"],
+                            "Bedrooms": 3,  # متوسط افتراضي
+                            "Bathrooms": 2,  # متوسط افتراضي
+                            "Price_Per_M": row["Price_Per_M_mean"],
+                            "Down_Payment": 0,  # افتراضي
+                            "Payment_Code": 0,  # نقدي افتراضي
+                            "PropertyType_Code": 0,  # شقة افتراضي
+                        }
+                    ]
+                )
+
+                # التأكد من نفس الأعمدة
+                for col in X_train.columns:
+                    if col not in area_data.columns:
+                        area_data[col] = 0
+
+                area_data = area_data[X_train.columns]
+
+                # التنبؤ
+                predicted_price = rf_model.predict(area_data)[0]
+                avg_price1.at[idx, "Fair_Price"] = predicted_price
+
+            # 9. عرض دقة النموذج
+            y_pred = rf_model.predict(X_test)
+            mae = mean_absolute_error(y_test, y_pred)
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            print(f"✅ ML Model Trained | MAE: {mae:,.0f} EGP | RMSE: {rmse:,.0f} EGP")
+
+        except Exception as e:
+            print(f"⚠️ ML Model failed: {e}")
+            # استخدام الطريقة التقليدية كبديل
+            avg_price1["Fair_Price"] = (
+                avg_price1["Price_Per_M_mean"] * avg_price1["Avg_Area"]
+            )
+
+    # 10. حساب Scores (يبقى كما هو)
+    price_min = avg_price1["Price_Per_M_mean"].min()
+    price_max = avg_price1["Price_Per_M_mean"].max()
+    avg_price1["Price_Score"] = 1 - (
+        (avg_price1["Price_Per_M_mean"] - price_min) / (price_max - price_min)
+    )
+
+    std_min = avg_price1["Price_Std"].min()
+    std_max = avg_price1["Price_Std"].max()
+    avg_price1["Stability_Score"] = 1 - (
+        (avg_price1["Price_Std"] - std_min) / (std_max - std_min)
+    )
+
+    count_min = avg_price1["Property_Count"].min()
+    count_max = avg_price1["Property_Count"].max()
+    area_min = avg_price1["Avg_Area"].min()
+    area_max = avg_price1["Avg_Area"].max()
+
+    avg_price1["Area_Score"] = (avg_price1["Avg_Area"] - area_min) / (
+        area_max - area_min
+    )
+    avg_price1["Supply_Score"] = (avg_price1["Property_Count"] - count_min) / (
+        count_max - count_min
+    )
+
+    # 11. Buy Score محسّن
+    avg_price1["Buy_Score"] = (
+        avg_price1["Price_Score"] * 0.40
+        + avg_price1["Stability_Score"] * 0.25
+        + avg_price1["Supply_Score"] * 0.20
+        + avg_price1["Area_Score"] * 0.15
+    ) * 100
+
+    avg_price1["Buy_Score"] = avg_price1["Buy_Score"].clip(0, 100)
+
+    # 12. إضافة Value Score بناءً على Fair Price
+    if "Fair_Price" in avg_price1.columns:
+        avg_price1["Value_Score"] = avg_price1.apply(
+            lambda row: (
+                100 * (1 - (row["Avg_Price"] / row["Fair_Price"]))
+                if row["Fair_Price"] > 0
+                else 50
+            ),
+            axis=1,
+        ).clip(0, 100)
+
+        # دمج Value Score مع Buy Score
+        avg_price1["Buy_Score"] = (
+            avg_price1["Buy_Score"] * 0.7 + avg_price1["Value_Score"] * 0.3
+        )
+
+    def buy_label(score):
+        if score >= 80:
+            return "🟢 Excellent Deal"
+        elif score >= 65:
+            return "🟡 Good Option"
+        elif score >= 50:
+            return "🟠 Fair"
+        else:
+            return "🔴 Overpriced"
+
+    avg_price1["Buy_Label"] = avg_price1["Buy_Score"].apply(buy_label)
+
+    # 13. إضافة Recommendation بناءً على Score
+    avg_price1["Recommendation"] = avg_price1.apply(
+        lambda row: (
+            "🏆 Highly Recommended"
+            if row["Buy_Score"] >= 80
+            else (
+                "👍 Good Value"
+                if row["Buy_Score"] >= 65
+                else "🤔 Consider" if row["Buy_Score"] >= 50 else "⚠️ Overpriced"
+            )
+        ),
+        axis=1,
+    )
+
+    return avg_price1
+
+
+def get_purchase_recommendations(filtered_df):
+    recommendations = []
+    try:
+        if not filtered_df.empty and "Bedrooms" in filtered_df.columns:
+            room_counts = filtered_df["Bedrooms"].value_counts()
+            if not room_counts.empty:
+                most_popular = room_counts.idxmax()
+                recommendations.append(
+                    f"- الشقق {most_popular} غرف هي الأكثر طلبًا حاليًا"
+                )
+    except:
+        recommendations.append("- الشقق 3-4 غرف هي الأكثر طلبًا بشكل عام")
+    recommendations.append(
+        "- لو ميزانيتك متوسطة → ركّز على المناطق ذات سعر متر أقل من المتوسط العام"
+    )
+    recommendations.append(
+        "- تجنّب المناطق ذات الانحراف السعري العالي (عدم استقرار الأسعار)"
+    )
+    recommendations.append("- Fair Price هي مؤشر جيد لتقييم السعر العادل للعقار")
+    recommendations.append(
+        "- Buy Score يساعدك في اختيار المناطق ذات الفرص الأفضل للشراء"
+    )
+    return recommendations
+
+
+def calculate_area_insights(filtered_df):
+    if (
+        filtered_df.empty
+        or "Area" not in filtered_df.columns
+        or "Price" not in filtered_df.columns
+    ):
+        return "120 و 180 متر", "بمعدل أسرع"
+    try:
+        area_counts, area_bins = np.histogram(filtered_df["Area"].dropna(), bins=10)
+        max_density_idx = np.argmax(area_counts)
+        best_area_min = area_bins[max_density_idx]
+        best_area_max = area_bins[max_density_idx + 1]
+        best_area_text = f"{int(best_area_min)} و {int(best_area_max)} متر"
+    except:
+        best_area_text = "120 و 180 متر"
+    try:
+        median_area = filtered_df["Area"].median()
+        small_apartments = filtered_df[filtered_df["Area"] <= median_area]
+        large_apartments = filtered_df[filtered_df["Area"] > median_area]
+        if not small_apartments.empty and not large_apartments.empty:
+            small_price_per_m = (
+                small_apartments["Price"].mean() / small_apartments["Area"].mean()
+            )
+            large_price_per_m = (
+                large_apartments["Price"].mean() / large_apartments["Area"].mean()
+            )
+            price_increase_rate = (
+                (large_price_per_m - small_price_per_m) / small_price_per_m
+            ) * 100
+            if price_increase_rate > 0:
+                price_rate_text = f"{price_increase_rate:.1f}%"
+            else:
+                price_rate_text = "بمعدل أسرع"
+        else:
+            price_rate_text = "بمعدل أسرع"
+    except:
+        price_rate_text = "بمعدل أسرع"
+    return best_area_text, price_rate_text
+
+
+df = load_data()
 if "last_update" not in st.session_state:
     st.session_state["last_update"] = "Unknown"
 
-# العنوان الرئيسي
 st.markdown(
-    '<h1 class="main-title">🏠 Real Estate AI Dashboard - مصر</h1>',
+    '<h1 class="main-title">🏠 Real Estate Dashboard</h1>',
     unsafe_allow_html=True,
 )
 
-# تبويبات
-tab1, tab2 = st.tabs(
-    [
-        "📊 Dashboard",
+tab1, tab2 = st.tabs(["📊 Dashboard", "📈 Market Insights"])
+view = ["Sea", "Club", "Street"]
 
-        "📈 Market Insights",
-    ]
-)
-view = ["Sea" , "Club" , "Street"]
-with tab1:  # Dashboard الأساسي
-    # ===== SIDEBAR FILTERS =====
+with tab1:
     st.sidebar.header("🔍 Filters")
-
-    # فلتر النوع
     property_types = (
         ["All"] + sorted(df["PropertyType"].dropna().unique().tolist())
         if "PropertyType" in df.columns
@@ -240,54 +444,38 @@ with tab1:  # Dashboard الأساسي
         else ["All"]
     )
     bed_types = st.sidebar.selectbox("Bedrooms", bed_types)
-
     Bathrooms_types = (
         ["All"] + sorted(df["Bathrooms"].dropna().unique().tolist())
         if "Bathrooms" in df.columns
         else ["All"]
     )
     Bathrooms_types = st.sidebar.selectbox("Bathrooms", Bathrooms_types)
-    # فلتر النوع
-    view_types = (
-        ["All"] + sorted(view)
-        if "Title" in df.columns
-        else ["All"]
-    )
+    view_types = ["All"] + sorted(view) if "Title" in df.columns else ["All"]
     selected_view = st.sidebar.selectbox("View", view_types)
-
-    # فلتر المدينة
     cities = (
         ["All"] + sorted(df["State"].dropna().unique().tolist())
         if "State" in df.columns
         else ["All"]
     )
     selected_city = st.sidebar.selectbox("State", cities)
-
-    # فلتر المنطقة
     locations = (
         ["All"] + sorted(df["Location"].dropna().unique().tolist())
         if "Location" in df.columns
         else ["All"]
     )
     selected_location = st.sidebar.selectbox("Location", locations)
-    print(df["Price"])
-    # فلتر السعر
     if "Price" in df.columns:
         price_min = int(df["Price"].min())
         price_max = int(df["Price"].max())
         price_range = st.sidebar.slider(
             "Price Range (EGP)", price_min, price_max, (price_min, price_max)
         )
-
-    # فلتر المساحة
     if "Area" in df.columns:
         area_min = int(df["Area"].min())
         area_max = int(df["Area"].max())
         area_range = st.sidebar.slider(
             "Area Range (m²)", area_min, area_max, (area_min, area_max)
         )
-
-    # فلتر طريقة الدفع
     payment_methods = (
         ["All"] + sorted(df["Payment_Method"].dropna().unique().tolist())
         if "Payment_Method" in df.columns
@@ -295,55 +483,42 @@ with tab1:  # Dashboard الأساسي
     )
     selected_payment = st.sidebar.selectbox("Payment Method", payment_methods)
 
-    # ===== تطبيق الفلترات =====
     filtered_df = df.copy()
-
     if selected_city != "All" and "State" in filtered_df.columns:
         filtered_df = filtered_df[filtered_df["State"] == selected_city]
-
     if bed_types != "All" and "Bedrooms" in filtered_df.columns:
         filtered_df = filtered_df[filtered_df["Bedrooms"] == bed_types]
-
     if Bathrooms_types != "All" and "Bathrooms" in filtered_df.columns:
         filtered_df = filtered_df[filtered_df["Bathrooms"] == Bathrooms_types]
-
     if selected_type != "All" and "PropertyType" in filtered_df.columns:
         filtered_df = filtered_df[filtered_df["PropertyType"] == selected_type]
-
     if selected_view != "All" and "Title" in filtered_df.columns:
         filtered_df = filtered_df[
-            filtered_df["Title"].astype(str).str.contains(selected_view, case=False, na=False)
+            filtered_df["Title"]
+            .astype(str)
+            .str.contains(selected_view, case=False, na=False)
         ]
-        # df[df["Title"].astype(str).str.contains("Sea", case=False, na=False)]
-
     if selected_location != "All" and "Location" in filtered_df.columns:
         filtered_df = filtered_df[filtered_df["Location"] == selected_location]
-
     if selected_payment != "All" and "Payment_Method" in filtered_df.columns:
         filtered_df = filtered_df[filtered_df["Payment_Method"] == selected_payment]
-
     if "Price" in filtered_df.columns:
         filtered_df = filtered_df[
             (filtered_df["Price"] >= price_range[0])
             & (filtered_df["Price"] <= price_range[1])
         ]
-
     if "Area" in filtered_df.columns:
         filtered_df = filtered_df[
             (filtered_df["Area"] >= area_range[0])
             & (filtered_df["Area"] <= area_range[1])
         ]
 
-    # ===== KPIs =====
     st.subheader("📊 Key Metrics")
-
     col1, col2, col3, col4 = st.columns(4)
-
     with col1:
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         st.metric("Total Properties", len(filtered_df))
         st.markdown("</div>", unsafe_allow_html=True)
-
     with col2:
         avg_price = (
             filtered_df["Price"].mean()
@@ -353,7 +528,6 @@ with tab1:  # Dashboard الأساسي
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         st.metric("Avg Price", f"{avg_price:,.0f} EGP" if avg_price > 0 else "N/A")
         st.markdown("</div>", unsafe_allow_html=True)
-
     with col3:
         avg_area = (
             filtered_df["Area"].mean()
@@ -363,7 +537,6 @@ with tab1:  # Dashboard الأساسي
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         st.metric("Avg Area", f"{avg_area:.0f} m²" if avg_area > 0 else "N/A")
         st.markdown("</div>", unsafe_allow_html=True)
-
     with col4:
         if "Payment_Method" in filtered_df.columns and not filtered_df.empty:
             installment_count = (filtered_df["Payment_Method"] == "Installments").sum()
@@ -378,129 +551,167 @@ with tab1:  # Dashboard الأساسي
         st.metric("Installments", f"{installment_ratio:.1f}%")
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # ===== CHARTS =====
-    st.subheader("📈 Analytics")
-    fig7 = px.violin(
-        filtered_df,
-        "PropertyType",
-        "Price",
-        box=True,
-        # points='all',
-        color="Payment_Method",
-        title="Price per m² Distribution by Property Type",
+    st.markdown(
+        "💡 **معلومة مهمة:** متوسط السعر والمساحة بيعكسوا اختياراتك الحالية. غيّر الفلاتر وشوف إزاي القرار بيتغير."
     )
-    st.plotly_chart(fig7, use_container_width=True)
-    # Chart 1: توزيع العقارات حسب المدينة
-    if not filtered_df.empty and "State" in filtered_df.columns:
-        fig1 = px.bar(
-            filtered_df["State"].value_counts().reset_index().head(20),
-            x="State",
-            y="count",
-            title="Properties Distribution by City",
-            color="count",
-            color_continuous_scale="Viridis",
-        )
-        st.plotly_chart(fig1, use_container_width=True)
 
-    # Chart 2: العلاقة بين السعر والمساحة
-    if len(filtered_df) > 1 and all(
-        col in filtered_df.columns
-        for col in ["Area", "Price", "PropertyType", "Bedrooms"]
-    ):
-        fig2 = px.scatter(
+    st.subheader("📈 Analytics")
+
+    if not filtered_df.empty:
+        if "State" in filtered_df.columns:
+            fig1 = px.bar(
+                filtered_df["State"].value_counts().reset_index().head(20),
+                x="State",
+                y="count",
+                title="Properties Distribution by State (Top 20)",
+                color="count",
+                color_continuous_scale="Viridis",
+            )
+            st.plotly_chart(fig1, use_container_width=True)
+
+        fig7 = px.violin(
             filtered_df,
-            x="Area",
-            y="Price",
-            color="PropertyType",
-            size="Bedrooms",
-            hover_name="State" if "State" in filtered_df.columns else None,
-            hover_data=(
-                ["Location", "Payment_Method", "Price_Per_M"]
-                if all(
-                    col in filtered_df.columns
-                    for col in ["Location", "Payment_Method", "Price_Per_M"]
-                )
-                else None
-            ),
-            title="Price vs Area Analysis",
-            labels={"Area": "Area (m²)", "Price": "Price (EGP)"},
+            "PropertyType",
+            "Price",
+            box=True,
+            color="Payment_Method",
+            title="Price Distribution by Property Type",
         )
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig7, use_container_width=True)
 
-    # Chart 3: متوسط سعر المتر حسب المنطقة
-    if (
-        not filtered_df.empty
-        and "Location" in filtered_df.columns
-        and "Price_Per_M" in filtered_df.columns
-    ):
-        col1, col2 = st.columns(2)
-        with col1:
-            avg_price_by_location = (
-                filtered_df.groupby("Location").agg({"Price_Per_M": "mean"}).reset_index()
-            )
-            fig3 = px.bar(
-                avg_price_by_location.sort_values("Price_Per_M", ascending=True).head(10),
-                x="Location",
-                y="Price_Per_M",
-                title="Average Price Per m² by Location (Top 10) 'ASC'",
-                color="Price_Per_M",
-                color_continuous_scale="Plasma",
-            )
-            st.plotly_chart(fig3, use_container_width=True)
-        with col2:
-            avg_price_by_location_desc = (
-                filtered_df.groupby("Location").agg({"Price_Per_M": "mean"}).reset_index()
-            )
-            fig4 = px.bar(
-                avg_price_by_location_desc.sort_values("Price_Per_M", ascending=False).head(10),
-                x="Location",
-                y="Price_Per_M",
-                title="Average Price Per m² by Location (Top 10) 'DESC'",
-                color="Price_Per_M",
-                color_continuous_scale="Plasma",
-            )
-            st.plotly_chart(fig4, use_container_width=True)
+        fig14 = px.violin(
+            filtered_df,
+            x="Payment_Method",
+            y="Price",
+            box=True,
+            points="all",
+            color="Payment_Method",
+            title="Price Distribution by Payment Method",
+        )
+        st.plotly_chart(fig14, use_container_width=True)
 
-    if (
-        not filtered_df.empty
-        and "State" in filtered_df.columns
-        and "Price_Per_M" in filtered_df.columns
-    ):
-        col1, col2 = st.columns(2)
-        with col1:
-            avg_price_by_location = (
-                filtered_df.groupby("State").agg({"Price_Per_M": "mean"}).reset_index()
+        if len(filtered_df) > 1 and all(
+            col in filtered_df.columns
+            for col in ["Area", "Price", "PropertyType", "Bedrooms"]
+        ):
+            fig2 = px.scatter(
+                filtered_df,
+                x="Area",
+                y="Price",
+                color="PropertyType",
+                size="Bedrooms",
+                hover_name="State" if "State" in filtered_df.columns else None,
+                hover_data=(
+                    ["Location", "Payment_Method", "Price_Per_M"]
+                    if all(
+                        col in filtered_df.columns
+                        for col in ["Location", "Payment_Method", "Price_Per_M"]
+                    )
+                    else None
+                ),
+                title="Price vs Area Analysis",
+                labels={"Area": "Area (m²)", "Price": "Price (EGP)"},
             )
-            fig3 = px.bar(
-                avg_price_by_location.sort_values("Price_Per_M", ascending=False).head(10),
-                x="State",
-                y="Price_Per_M",
-                title="Average Price Per m² by State (Top 10) 'DESC'",
-                color="Price_Per_M",
-                color_continuous_scale="Plasma",
-            )
-            st.plotly_chart(fig3, use_container_width=True)
-        with col2:
-            avg_price_by_location = (
-                filtered_df.groupby("State").agg({"Price_Per_M": "mean"}).reset_index()
-            )
-            fig3 = px.bar(
-                avg_price_by_location.sort_values("Price_Per_M", ascending=True).head(10),
-                x="State",
-                y="Price_Per_M",
-                title="Average Price Per m² by State (Top 10) 'ASC'",
-                color="Price_Per_M",
-                color_continuous_scale="Plasma",
-            )
-            st.plotly_chart(fig3, use_container_width=True)
+            st.plotly_chart(fig2, use_container_width=True)
 
-    # ===== DATA TABLE =====
+        best_area_text, price_rate_text = calculate_area_insights(filtered_df)
+        st.markdown(
+            f"**💡 ملاحظة مهمة:** أفضل قيمة مقابل السعر غالبًا بين **{best_area_text}**. المساحات الأكبر سعرها بيزيد **{price_rate_text}** من قيمتها الفعلية."
+        )
+
+        if "Location" in filtered_df.columns and "Price_Per_M" in filtered_df.columns:
+            st.markdown(
+                "📍 **مقارنة المناطق** مش دايمًا المنطقة الأغلى هي الأفضل. في مناطق سعر المتر أقل لكن الطلب عليها أعلى، وده بيدي قيمة أفضل مقابل السعر."
+            )
+            col1, col2 = st.columns(2)
+            with col1:
+                avg_price_by_location = (
+                    filtered_df.groupby("Location")
+                    .agg({"Price_Per_M": "mean"})
+                    .reset_index()
+                )
+                fig3 = px.bar(
+                    avg_price_by_location.sort_values(
+                        "Price_Per_M", ascending=True
+                    ).head(10),
+                    x="Location",
+                    y="Price_Per_M",
+                    title="Average Price Per m² by Location (Top 10) 'ASC'",
+                    color="Price_Per_M",
+                    color_continuous_scale="Plasma",
+                )
+                st.plotly_chart(fig3, use_container_width=True)
+            with col2:
+                avg_price_by_location_desc = (
+                    filtered_df.groupby("Location")
+                    .agg({"Price_Per_M": "mean"})
+                    .reset_index()
+                )
+                fig4 = px.bar(
+                    avg_price_by_location_desc.sort_values(
+                        "Price_Per_M", ascending=False
+                    ).head(10),
+                    x="Location",
+                    y="Price_Per_M",
+                    title="Average Price Per m² by Location (Top 10) 'DESC'",
+                    color="Price_Per_M",
+                    color_continuous_scale="Plasma",
+                )
+                st.plotly_chart(fig4, use_container_width=True)
+
+        if "State" in filtered_df.columns and "Price_Per_M" in filtered_df.columns:
+            col1, col2 = st.columns(2)
+            with col1:
+                avg_price_by_state = (
+                    filtered_df.groupby("State")
+                    .agg({"Price_Per_M": "mean"})
+                    .reset_index()
+                )
+                fig5 = px.bar(
+                    avg_price_by_state.sort_values("Price_Per_M", ascending=False).head(
+                        10
+                    ),
+                    x="State",
+                    y="Price_Per_M",
+                    title="Average Price Per m² by State (Top 10) 'DESC'",
+                    color="Price_Per_M",
+                    color_continuous_scale="Plasma",
+                )
+                st.plotly_chart(fig5, use_container_width=True)
+            with col2:
+                fig6 = px.bar(
+                    avg_price_by_state.sort_values("Price_Per_M", ascending=True).head(
+                        10
+                    ),
+                    x="State",
+                    y="Price_Per_M",
+                    title="Average Price Per m² by State (Top 10) 'ASC'",
+                    color="Price_Per_M",
+                    color_continuous_scale="Plasma",
+                )
+                st.plotly_chart(fig6, use_container_width=True)
+    fig12 = px.box(
+            filtered_df,
+            x="Bedrooms",
+            y="Price_Per_M",
+            color="PropertyType",
+            title="Price per m² Distribution by Bedrooms Count",
+        )
+    st.plotly_chart(fig12, use_container_width=True)
+
+    fig13 = px.box(
+            filtered_df,
+            x="Bathrooms",
+            y="Price_Per_M",
+            color="PropertyType",
+            title="Price per m² Distribution by Bathrooms Count",
+        )
+    st.plotly_chart(fig13, use_container_width=True)
+
     st.subheader("📋 Property List")
-
     search_query = st.text_input(
         "🔍 Search properties...", placeholder="Type property name or location..."
     )
-
     if (
         search_query
         and "Title" in filtered_df.columns
@@ -520,7 +731,7 @@ with tab1:  # Dashboard الأساسي
     if not display_df.empty:
         available_columns = []
         for col in [
-            "Title".format(),
+            "Title",
             "PropertyType",
             "Price",
             "Location",
@@ -533,7 +744,6 @@ with tab1:  # Dashboard الأساسي
         ]:
             if col in display_df.columns:
                 available_columns.append(col)
-
         st.dataframe(
             display_df[available_columns].head(20),
             use_container_width=True,
@@ -542,215 +752,152 @@ with tab1:  # Dashboard الأساسي
     else:
         st.info("No properties match your filters. Try adjusting them.")
 
-with tab2:  # Market Insights
+with tab2:
     st.subheader("📈 Market Insights & Analytics")
-
     insights = calculate_market_insights(df)
-
     if insights:
-        # البطاقات الرئيسية
         col1, col2, col3 = st.columns(3)
-
         with col1:
             if "price_stats" in insights:
                 st.metric(
-                    "💰 متوسط السعر", f"{insights['price_stats']['mean']:,.0f} EGP"
+                    "💰 Average Price", f"{insights['price_stats']['mean']:,.0f} EGP"
                 )
-
         with col2:
             if "price_per_m_stats" in insights:
                 st.metric(
-                    "📏 متوسط سعر المتر",
+                    "📏 Average Price/m²",
                     f"{insights['price_per_m_stats']['mean']:,.0f} EGP",
                 )
-
         with col3:
             if "payment_distribution" in insights:
                 installment_rate = insights["payment_distribution"].get(
                     "Installments", 0
                 )
-                st.metric("💳 نسبة التقسيط", f"{installment_rate:.1f}%")
+                st.metric("💳 Installment Rate", f"{installment_rate:.1f}%")
 
         st.markdown("---")
 
         f = px.histogram(
-        filtered_df,
-        "Price",
-        text_auto=True,
-        color_discrete_sequence=["#292C60" ],
-        title="Price Distribution",
+            filtered_df,
+            "Price",
+            text_auto=True,
+            color_discrete_sequence=["#292C60"],
+            title="Price Distribution",
         )
         st.plotly_chart(f, use_container_width=True)
 
-        # تحليل المناطق
         col4, col5 = st.columns(2)
-
         with col4:
             if "expensive_areas" in insights:
-                st.write("### 🏙️ أغلى المناطق")
+                st.write("### 🏙️ Most Expensive Areas")
                 for area, price in insights["expensive_areas"].items():
-                    st.write(f"**{area}:** {price:,.0f} EGP/م²")
-
+                    st.write(f"**{area}:** {price:,.0f} EGP/m²")
         with col5:
             if "affordable_areas" in insights:
-                st.write("### 💰 أكثر المناطق معقولة")
+                st.write("### 💰 Most Affordable Areas")
                 for area, price in insights["affordable_areas"].items():
-                    st.write(f"**{area}:** {price:,.0f} EGP/م²")
+                    st.write(f"**{area}:** {price:,.0f} EGP/m²")
 
-        avg_price1 = (
-            filtered_df.groupby(["State", "Location"])["Price_Per_M"]
-            .mean()
-            .reset_index()
-        )
-
-        # حساب إحصائيات إضافية
-        stats_df = filtered_df.groupby(["State", "Location"]).agg({
-            "Price_Per_M": ["mean", "count", "std"],
-            "Price": "mean",
-            "Area": "mean"
-        }).reset_index()
-
-        # تسطيح MultiIndex columns
-        stats_df.columns = ['_'.join(col).strip('_') if col[1] else col[0] for col in stats_df.columns.values]
-
-        # دمج البيانات
-        avg_price1 = avg_price1.merge(
-            stats_df[["State", "Location", "Price_Per_M_count", "Price_Per_M_std", "Price_mean", "Area_mean"]],
-            on=["State", "Location"],
-            how="left"
-        )
-
-        # إعادة تسمية الأعمدة
-        avg_price1 = avg_price1.rename(columns={
-            "Price_Per_M": "Price_Per_M_mean",
-            "Price_mean": "Avg_Price",
-            "Area_mean": "Avg_Area",
-            "Price_Per_M_count": "Property_Count",
-            "Price_Per_M_std": "Price_Std"
-        })
-
-        # خريطة الشجرة مع hover مخصص
-        fig12 = px.treemap(
-            avg_price1,
-            path=["State", "Location"],
-            values="Price_Per_M_mean",
-            title="State Distribution",
-            color="Price_Per_M_mean",
-            # color_continuous_scale="RdYlGn_r",  # الأحمر للأعلى، الأخضر للأدنى
-            hover_data={
-                "Price_Per_M_mean": ":.0f",  # تنسيق الأرقام
-                "Avg_Price": ":.0f",
-                "Avg_Area": ":.0f",
-                "Property_Count": True,
-                "Price_Std": ":.0f"
-            },
-            custom_data=["Price_Per_M_mean", "Avg_Price", "Avg_Area", "Property_Count", "Price_Std"]
-        )
-
-        # تحديث hover template
-        fig12.update_traces(
-            hovertemplate="<b>%{label}</b><br>" +
-                        "-------------------<br>" +
-                        "📊 <b>متوسط سعر المتر:</b> %{customdata[0]:,.0f} EGP<br>" +
-                        "💰 <b>متوسط السعر الكلي:</b> %{customdata[1]:,.0f} EGP<br>" +
-                        "📐 <b>متوسط المساحة:</b> %{customdata[2]:,.0f} م²<br>" +
-                        "🏠 <b>عدد العقارات:</b> %{customdata[3]:,.0f}<br>" +
-                        "📈 <b>انحراف المعياري للأسعار:</b> %{customdata[4]:,.0f} EGP<br>" +
-                        "-------------------<br>" +
-                        "<i>انقر للتكبير/التصغير</i>"
-        )
-
-        # تحديث التخطيط
-        fig12.update_layout(
-            margin=dict(t=40, l=25, r=25, b=20),
-            coloraxis_colorbar=dict(
-                title="سعر المتر (EGP)",
-                thickness=20,
-                len=0.75
+        if not filtered_df.empty:
+            treemap_data = create_treemap_data(filtered_df)
+            fig15 = px.treemap(
+                treemap_data,
+                path=["State", "Location"],
+                values="Price_Per_M_mean",
+                title="Market Distribution Tree Map",
+                color="Buy_Score",
+                # color_continuous_scale=["red", "orange", "yellow", "green"],
+                hover_data={
+                    "Price_Per_M_mean": ":.0f",
+                    "Avg_Price": ":.0f",
+                    "Avg_Area": ":.0f",
+                    "Property_Count": True,
+                    "Price_Std": ":.0f",
+                },
+                custom_data=[
+                    "Price_Per_M_mean",
+                    "Avg_Price",
+                    "Avg_Area",
+                    "Property_Count",
+                    "Price_Std",
+                    "Fair_Price",
+                    "Buy_Score",
+                    "Buy_Label",
+                ],
             )
-        )
+            fig15.update_traces(
+                hovertemplate="<b>%{label}</b><br>-------------------<br>📊 <b>Avg Price/m²:</b> %{customdata[0]:,.0f} EGP<br>💰 <b>Avg Total Price:</b> %{customdata[1]:,.0f} EGP<br>📐 <b>Avg Area:</b> %{customdata[2]:,.0f} m²<br>🏠 <b>Properties Count:</b> %{customdata[3]:,.0f}<br>📈 <b>Price Std Dev:</b> %{customdata[4]:,.0f} EGP<br>%{customdata[5]:,.0f} EGP <b>Fair Price</b><br>%{customdata[6]:.2f} <b>Buy Score</b><br>%{customdata[7]}<br>-------------------<br><i>Click to zoom in/out</i>"
+            )
+            fig15.update_layout(
+                margin=dict(t=40, l=25, r=25, b=20),
+                coloraxis_colorbar=dict(title="Buy_Score", thickness=20, len=0.75),
+            )
+            st.plotly_chart(fig15, use_container_width=True)
 
-        st.plotly_chart(fig12, use_container_width=True)
+        recommendations = get_purchase_recommendations(filtered_df)
+        st.success(f"### ✅ توصيات الشراء:\n{"\n".join(recommendations)}")
 
-        # توزيع أنواع العقارات
         if "property_distribution" in insights:
-            st.write("### 🏘️ توزيع أنواع العقارات")
-
+            st.write("### 🏘️ Property Type Distribution")
             prop_data = pd.DataFrame(
                 {
                     "Type": list(insights["property_distribution"].keys()),
                     "Percentage": list(insights["property_distribution"].values()),
                 }
             )
-
-            fig = px.pie(
+            fig16 = px.pie(
                 prop_data,
                 values="Percentage",
                 names="Type",
-                title="توزيع أنواع العقارات في السوق",
+                title="Property Type Market Distribution",
             )
-            st.plotly_chart(fig, use_container_width=True)
-            # احسب متوسط السعر لكل نوع
-            avg_price_by_type = filtered_df.groupby('PropertyType')['Price'].mean().reset_index()
-            col7, col8 = st.columns(2)
-            with col7:
-                fig8 = px.pie(
-                    avg_price_by_type,
-                    values='Price',  # متوسط السعر لكل نوع
-                    names='PropertyType',
-                    title="متوسط سعر العقارات حسب النوع",
-                )
-                st.plotly_chart(fig8, use_container_width=True)
+            st.plotly_chart(fig16, use_container_width=True)
+
+            avg_price_by_type = (
+                filtered_df.groupby("PropertyType")["Price"].mean().reset_index()
+            )
             avg_pricem_by_type = (
                 filtered_df.groupby("PropertyType")["Price_Per_M"].mean().reset_index()
             )
-            with col8:
-                fig9 = px.pie(
-                    avg_pricem_by_type,
-                    values="Price_Per_M",  # متوسط السعر لكل نوع
+            col7, col8 = st.columns(2)
+            with col7:
+                fig17 = px.pie(
+                    avg_price_by_type,
+                    values="Price",
                     names="PropertyType",
-                    title="متوسط سعر المتر العقارات حسب النوع",
+                    title="Average Price by Property Type",
                 )
-                st.plotly_chart(fig9, use_container_width=True)
+                st.plotly_chart(fig17, use_container_width=True)
+            with col8:
+                fig18 = px.pie(
+                    avg_pricem_by_type,
+                    values="Price_Per_M",
+                    names="PropertyType",
+                    title="Average Price/m² by Property Type",
+                )
+                st.plotly_chart(fig18, use_container_width=True)
 
-
-# ========== SIDEBAR COMMON ELEMENTS ==========
-# معلومات إضافية في الـ Sidebar
 st.sidebar.markdown("---")
 st.sidebar.subheader("📈 Quick Stats")
-
 if not df.empty:
     if "Price" in df.columns:
         st.sidebar.metric("Total Value", f"{df['Price'].sum():,.0f} EGP")
-
     if "Price_Per_M" in df.columns:
         avg_price_m2 = df["Price_Per_M"].mean()
         st.sidebar.metric(
             "Avg Price/m²", f"{avg_price_m2:,.0f} EGP" if avg_price_m2 > 0 else "N/A"
         )
-
     if "PropertyType" in df.columns:
         st.sidebar.metric("Property Types", df["PropertyType"].nunique())
 
-# معلومات التحديث التلقائي
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔄 Auto-Update Status")
-
 st.sidebar.info(
-    f"""
-**Last Update:** {st.session_state.get('last_update', 'Checking...')}
-
-**Properties:** {len(df):,}
-**AI Features:** Enabled
-**Next Update:** 4:00 AM Egypt Time
-"""
+    f"**Last Update:** {st.session_state.get('last_update', 'Checking...')}\n\n**Properties:** {len(df):,}\n**AI Features:** Enabled\n**Next Update:** 4:00 AM Egypt Time"
 )
 
-# معلومات النظام
 st.sidebar.markdown("---")
 
-
-# Footer في الأسفل
 st.markdown("---")
 st.markdown(
     f"""
