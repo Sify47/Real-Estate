@@ -34,6 +34,62 @@ Built using Python and Streamlit with integrated analytics and machine learning.
 
 ---
 
+## 🧲 Data Collection & Cleaning Pipeline
+
+### 🔍 Data Sources
+- **PropertyFinder Egypt**
+- **Bayut Egypt**
+
+Listings are collected automatically using a custom Python scraping pipeline.
+
+---
+
+### 🛠️ Web Scraping
+- Built with `requests` and `BeautifulSoup`
+- Handles pagination and HTML inconsistencies
+- Uses custom user-agent headers
+- Includes rate limiting to avoid IP blocking
+- Error handling per page and per listing
+
+**Extracted fields include:**
+- Property Type  
+- Title  
+- Price  
+- Area (m²)  
+- Bedrooms & Bathrooms  
+- Location & State  
+- Down Payment  
+- Payment Method (Cash / Installments)  
+- Listing URL  
+
+---
+
+### 🧹 Data Cleaning & Feature Engineering
+Cleaning is performed in two stages:
+
+**Stage 1 – Location Normalization**
+- Parses raw location strings into `Location` and `State`
+- Handles inconsistent formats
+- Fixes naming issues (e.g. *Smoha → Smouha*)
+
+**Stage 2 – Data Standardization**
+- Converts numeric fields safely
+- Handles special text cases (studio, maid room, installment terms)
+- Removes incomplete records
+- Creates derived features:
+  - **Price per m²**
+  - **Payment Method classification**
+
+---
+
+### 🔄 Deduplication & Updates
+- Merges new data with existing records
+- Removes duplicates based on listing URL
+- Keeps the latest version of each property
+
+---
+
+
 ## 📊 Key Features
 - Dynamic filters (Location, Price, Area, Bedrooms, Payment Method)
 - Average Price & Price per m² analysis
