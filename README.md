@@ -1,4 +1,4 @@
-# 🏠 Real Estate Market Analysis Dashboard – Egypt
+# 🏠 Real Estate Market Analysis Dashboard
 
 An end-to-end **Data Analytics & Decision Support Dashboard** designed to help buyers understand the Egyptian real estate market and make smarter purchase decisions.
 
