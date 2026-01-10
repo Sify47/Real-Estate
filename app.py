@@ -516,6 +516,7 @@ with tab1:
     st.subheader("📊 Key Metrics")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
+
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         st.metric("Total Properties", len(filtered_df))
         st.markdown("</div>", unsafe_allow_html=True)
@@ -554,6 +555,18 @@ with tab1:
     st.markdown(
         "💡 **معلومة مهمة:** متوسط السعر والمساحة بيعكسوا اختياراتك الحالية. غيّر الفلاتر وشوف إزاي القرار بيتغير."
     )
+    treemap_data = create_treemap_data(filtered_df)
+    if treemap_data["Buy_Label"].value_counts().idxmax() == "🔴 Overpriced":
+        st.markdown(
+            '<div class="metric-card" style="background: linear-gradient(135deg, #ff4e50 0%, #f9d423 100%);">السوق عالى السعر حاليًا، خليك حذر في اختياراتك!</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div class="metric-card" style="background: linear-gradient(135deg, #43cea2 0%, #185a9d 100%);">السوق مناسب للشراء حاليًا، استغل الفرص!</div>',
+            unsafe_allow_html=True,
+        )
+    # st.write(f"{t["Buy_Label"].value_counts().idxmax()}: {len(filtered_df)} properties")
 
     st.subheader("📈 Analytics")
 
