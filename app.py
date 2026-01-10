@@ -326,13 +326,13 @@ def create_treemap_data(filtered_df):
 
     def buy_label(score):
         if score >= 80:
-            return "🟢 Excellent Deal"
+            return " فرصة شراء ممتازة 🟢"
         elif score >= 65:
-            return "🟡 Good Option"
+            return "خيار جيد 🟡"
         elif score >= 50:
-            return "🟠 Fair"
+            return "كويس 🟠"
         else:
-            return "🔴 Overpriced"
+            return "سعر عالى 🔴"
 
     avg_price1["Buy_Label"] = avg_price1["Buy_Score"].apply(buy_label)
 
@@ -556,7 +556,7 @@ with tab1:
         "💡 **معلومة مهمة:** متوسط السعر والمساحة بيعكسوا اختياراتك الحالية. غيّر الفلاتر وشوف إزاي القرار بيتغير."
     )
     treemap_data = create_treemap_data(filtered_df)
-    if treemap_data["Buy_Label"].value_counts().idxmax() == "🔴 Overpriced":
+    if treemap_data["Buy_Label"].value_counts().idxmax() == "سعر عالى 🔴":
         st.markdown(
             '<div class="metric-card" style="background: linear-gradient(135deg, #ff4e50 0%, #f9d423 100%);">السوق عالى السعر حاليًا، خليك حذر في اختياراتك!</div>',
             unsafe_allow_html=True,
@@ -850,6 +850,88 @@ with tab2:
         recommendations = get_purchase_recommendations(filtered_df)
         st.success(f"### ✅ توصيات الشراء:\n{"\n".join(recommendations)}")
 
+        def create_buy_score_gauge(score):
+            fig = go.Figure(
+                go.Indicator(
+                    mode="gauge+number",
+                    value=score,
+                    number={"suffix": " / 100"},
+                    title={"text": "🏷️ Buy Score"},
+                    gauge={
+                        "axis": {"range": [0, 100]},
+                        "bar": {"color": "#1f77b4"},
+                        "steps": [
+                            {"range": [0, 50], "color": "#ff4d4d"},
+                            {"range": [50, 65], "color": "#ffa500"},
+                            {"range": [65, 80], "color": "#ffd700"},
+                            {"range": [80, 100], "color": "#2ecc71"},
+                        ],
+                        "threshold": {
+                            "line": {"color": "black", "width": 4},
+                            "thickness": 0.75,
+                            "value": score,
+                        },
+                    },
+                )
+            )
+
+            fig.update_layout(
+                height=300,
+                margin=dict(l=20, r=20, t=50, b=20),
+                paper_bgcolor="rgba(0,0,0,0)",
+            )
+
+            return fig
+
+        BUY_SCORE_TOOLTIP = """
+            **إزاي بنحسب Buy Score؟**
+
+            • 💰 **تنافسية السعر (40%)**  
+            قد إيه أسعار المنطقة مناسبة مقارنة بباقي السوق.
+
+            • 📈 **استقرار السوق (25%)**  
+            كل ما تذبذب الأسعار أقل، كل ما المخاطرة أقل.
+
+            • 🏠 **مستوى المعروض (20%)**  
+            كل ما عدد العقارات المتاحة أكبر، فرص التفاوض بتكون أفضل.
+
+            • 📐 **قيمة المساحة (15%)**  
+            المناطق ذات المساحات المتوسطة والكبيرة بتحتفظ بقيمتها على المدى الطويل.
+
+            • ⚖️ **تعديل السعر العادل (Fair Price)**  
+            الدرجة النهائية بتتعدل حسب قرب السعر الفعلي من السعر العادل المتوقع.
+
+            **تفسير الدرجات:**
+            🟢 **80 – 100** → فرصة شراء ممتازة  
+            🟡 **65 – 79** → خيار جيد (يفضل التفاوض)  
+            🟠 **50 – 64** → سعر عادل  
+            🔴 **أقل من 50** → السعر مرتفع مقارنة بالسوق
+            """
+
+        st.subheader("🏷️ Buy Recommendation")
+
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            avg_buy_score = treemap_data["Buy_Score"].mean()
+            st.plotly_chart(
+                create_buy_score_gauge(avg_buy_score),
+                use_container_width=True,
+            )
+            if avg_buy_score >= 80:
+                st.success("✅ فرصة شراء ممتازة في المناطق المختارة.")
+            elif avg_buy_score >= 65:
+                st.warning("🟡 خيارات جيدة متاحة – حاول التفاوض للحصول على سعر أفضل.")
+            elif avg_buy_score >= 50:
+                st.info("🟠 السوق عادل حاليًا – قارن بين الخيارات بحذر.")
+            else:
+                st.error("🔴 الأسعار مرتفعة – يُفضَّل الانتظار أو التفاوض بقوة.")
+
+
+        with col2:
+            st.markdown("### ℹ️ Buy Score Explanation")
+            st.info(BUY_SCORE_TOOLTIP)
+
         if "property_distribution" in insights:
             st.write("### 🏘️ Property Type Distribution")
             prop_data = pd.DataFrame(
@@ -889,6 +971,7 @@ with tab2:
                     title="Average Price/m² by Property Type",
                 )
                 st.plotly_chart(fig18, use_container_width=True)
+
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("📈 Quick Stats")
