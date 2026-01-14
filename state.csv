@@ -1,4 +1,4 @@
-Area,Category,Demand_Type,Near_Sea,Schools_Quality,Services_Level,Transportation,Investment_Potential,Resale_Liquidity,Area_Score,Key_Insights
+Area_Name,Category,Demand_Type,Near_Sea,Schools_Quality,Services_Level,Transportation,Investment_Potential,Resale_Liquidity,Area_Score,Key_Insights
 Smouha,High-End,Family-Residential,0,5,5,4,5,5,92,"Elite schools, club proximity, strong resale market"
 New Smouha,High-End,Family-Residential,0,4,4,3,4,4,85,"Modern compounds, growing demand"
 Veranda Smouha,High-End,Gated-Community,0,4,4,3,4,4,83,"Secure compound, limited supply"
@@ -29,3 +29,4 @@ Borg El Arab,Industrial-New,Industrial-Investment,0,2,3,3,4,2,69,"Industrial emp
 Borg El Arab City,Industrial-New,Planned-City,0,3,3,3,4,3,72,"Future growth potential"
 Amreya,Economic,Industrial-Housing,0,1,2,2,2,1,48,"Worker housing"
 King Mariout,Economic,Logistics-Industrial,0,1,2,2,2,1,46,"Logistics & industrial zone"
+
