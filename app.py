@@ -11,6 +11,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
+# إعداد الصفحة
 st.set_page_config(page_title="Real Estate Egypt", page_icon="🏠", layout="wide")
 
 st.markdown(
@@ -35,6 +36,7 @@ st.markdown(
 )
 
 
+# --- 1. تحميل البيانات ---
 @st.cache_data(ttl=300)
 def load_data():
     try:
@@ -76,6 +78,7 @@ def load_data():
                 except:
                     pass
             return df
+        # Dummy Data Fallback
         return pd.DataFrame(
             {
                 "Title": ["Sample Property 1", "Sample Property 2"],
@@ -94,6 +97,73 @@ def load_data():
     except Exception as e:
         st.sidebar.error(f"❌ Error loading data: {str(e)[:100]}")
         return pd.DataFrame()
+
+
+# --- 2. تدريب النموذج (مرة واحدة فقط) ---
+@st.cache_resource
+def train_model_once(df):
+    """
+    تدريب النموذج مرة واحدة وحفظه في الذاكرة لتسريع التطبيق.
+    """
+    ml_df = df.copy()
+
+    # Preprocessing
+    if "Payment_Method" in ml_df.columns:
+        ml_df["Payment_Code"] = (
+            ml_df["Payment_Method"]
+            .map({"Cash": 0, "Installments": 1, "نقدي": 0, "تقسيط": 1})
+            .fillna(0)
+        )
+
+    property_map = {}
+    if "PropertyType" in ml_df.columns:
+        property_types = ml_df["PropertyType"].unique()
+        property_map = {pt: i for i, pt in enumerate(property_types)}
+        ml_df["PropertyType_Code"] = ml_df["PropertyType"].map(property_map)
+
+    # تحديد الميزات
+    numeric_features = []
+    candidates = [
+        "Area",
+        "Bedrooms",
+        "Bathrooms",
+        "Price_Per_M",
+        "Down_Payment",
+        "Payment_Code",
+        "PropertyType_Code",
+    ]
+    for col in candidates:
+        if col in ml_df.columns:
+            numeric_features.append(col)
+
+    ml_df = ml_df[numeric_features + ["Price"]].dropna()
+
+    if len(ml_df) < 50:
+        return None, [], {}
+
+    X = ml_df[numeric_features]
+    y = ml_df["Price"]
+
+    try:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=45
+        )
+
+        # زيادة الدقة قليلاً لأن التدريب يحصل مرة واحدة
+        rf_model = RandomForestRegressor(
+            n_estimators=150, max_depth=20, random_state=47, n_jobs=-1
+        )
+        rf_model.fit(X_train, y_train)
+
+        # حساب مقاييس الأداء للعرض (اختياري)
+        y_pred = rf_model.predict(X_test)
+        mae = mean_absolute_error(y_test, y_pred)
+        # يمكن حفظ mae في session_state إذا أردت عرضه
+
+        return rf_model, numeric_features, property_map
+    except Exception as e:
+        print(f"ML Training Error: {e}")
+        return None, [], {}
 
 
 def calculate_market_insights(df):
@@ -127,8 +197,9 @@ def calculate_market_insights(df):
     return insights
 
 
-def create_treemap_data(filtered_df):
-    # 1. تحضير البيانات الأساسية للـ treemap
+# --- 3. دالة Treemap المعدلة (تستخدم النموذج الجاهز) ---
+def create_treemap_data(filtered_df, model, features, prop_map):
+    # Aggregations
     avg_price1 = (
         filtered_df.groupby(["State", "Location"])["Price_Per_M"].mean().reset_index()
     )
@@ -141,6 +212,7 @@ def create_treemap_data(filtered_df):
         "_".join(col).strip("_") if col[1] else col[0]
         for col in stats_df.columns.values
     ]
+
     avg_price1 = avg_price1.merge(
         stats_df[
             [
@@ -155,150 +227,100 @@ def create_treemap_data(filtered_df):
         on=["State", "Location"],
         how="left",
     )
+
     avg_price1 = avg_price1.rename(
         columns={
             "Price_Per_M": "Price_Per_M_mean",
             "Price_mean": "Avg_Price",
             "Area_mean": "Avg_Area",
             "Price_Per_M_count": "Property_Count",
-            "Price_Per_M_std": "Price_Std",
+            "Price_Per_M_std": "Price_Std",  # Note: Adjusted name mapping
         }
     )
 
-    # 2. تحويل البيانات النصية إلى رقمية للـ ML
-    # إنشاء نسخة من البيانات للتحليل
-    ml_df = filtered_df.copy()
+    # Fix renaming if needed
+    if "Price_Per_M_std" in avg_price1.columns:
+        avg_price1.rename(columns={"Price_Per_M_std": "Price_Std"}, inplace=True)
 
-    # تحويل الأعمدة النصية إلى رقمية
-    if "Payment_Method" in ml_df.columns:
-        # تحويل Payment_Method إلى 0 و 1 (أو أكثر إذا كان هناك خيارات متعددة)
-        ml_df["Payment_Code"] = (
-            ml_df["Payment_Method"]
-            .map(
-                {
-                    "Cash": 0,
-                    "Installments": 1,
-                    "نقدي": 0,  # للغة العربية
-                    "تقسيط": 1,  # للغة العربية
-                }
-            )
-            .fillna(0)
-        )  # افتراضي نقدي
+    # Fill NaN Std with 0 for single properties
+    avg_price1["Price_Std"] = avg_price1["Price_Std"].fillna(0)
 
-    if "PropertyType" in ml_df.columns:
-        # تحويل نوع العقار إلى كود رقمية
-        property_types = ml_df["PropertyType"].unique()
-        property_map = {pt: i for i, pt in enumerate(property_types)}
-        ml_df["PropertyType_Code"] = ml_df["PropertyType"].map(property_map)
-
-    # 3. اختيار الميزات الرقمية فقط
-    numeric_features = []
-    for col in ["Area", "Bedrooms", "Bathrooms", "Price_Per_M", "Down_Payment"]:
-        if col in ml_df.columns:
-            numeric_features.append(col)
-
-    if "Payment_Code" in ml_df.columns:
-        numeric_features.append("Payment_Code")
-    if "PropertyType_Code" in ml_df.columns:
-        numeric_features.append("PropertyType_Code")
-
-    # 4. التأكد من عدم وجود قيم مفقودة
-    ml_df = ml_df[numeric_features + ["Price"]].dropna()
-
-    # 5. التأكد من وجود بيانات كافية
-    if len(ml_df) < 10:
-        print("⚠️ Not enough data for ML model")
-        # استخدام الطريقة التقليدية
-        avg_price1["Fair_Price"] = (
-            avg_price1["Price_Per_M_mean"] * avg_price1["Avg_Area"]
-        )
-    else:
-        # 6. تقسيم البيانات
-        X = ml_df[numeric_features]
-        y = ml_df["Price"]
-
-        # 7. تدريب النموذج
+    # --- Prediction Logic using Cached Model ---
+    if model is not None and features:
         try:
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=45
-            )
-
-            rf_model = RandomForestRegressor(
-                n_estimators=125,  # قلل عدد الأشجار للسرعة
-                max_depth=15,
-                random_state=47,
-                n_jobs=-1,  # استخدام جميع الأنوية
-            )
-            rf_model.fit(X_train, y_train)
-
-            # 8. التنبؤ بالسعر العادل لكل منطقة
-            # إنشاء بيانات لكل منطقة للتنبؤ
+            # Prepare batch input for efficiency could be better, but iterrows is fine for small location counts
             for idx, row in avg_price1.iterrows():
-                # إنشاء نموذج افتراضي للمنطقة
-                area_data = pd.DataFrame(
-                    [
-                        {
-                            "Area": row["Avg_Area"],
-                            "Bedrooms": 3,  # متوسط افتراضي
-                            "Bathrooms": 2,  # متوسط افتراضي
-                            "Price_Per_M": row["Price_Per_M_mean"],
-                            "Down_Payment": 0,  # افتراضي
-                            "Payment_Code": 0,  # نقدي افتراضي
-                            "PropertyType_Code": 0,  # شقة افتراضي
-                        }
-                    ]
-                )
+                # Create input vector matching training features
+                input_data = {
+                    "Area": row["Avg_Area"],
+                    "Bedrooms": 3,  # Assumption
+                    "Bathrooms": 2,  # Assumption
+                    "Price_Per_M": row["Price_Per_M_mean"],
+                    "Down_Payment": 0,
+                    "Payment_Code": 0,  # Cash assumption
+                    "PropertyType_Code": prop_map.get(
+                        "Apartment", 0
+                    ),  # Default type assumption
+                }
 
-                # التأكد من نفس الأعمدة
-                for col in X_train.columns:
-                    if col not in area_data.columns:
-                        area_data[col] = 0
+                # Align columns
+                pred_vector = []
+                for f in features:
+                    pred_vector.append(input_data.get(f, 0))
 
-                area_data = area_data[X_train.columns]
-
-                # التنبؤ
-                predicted_price = rf_model.predict(area_data)[0]
+                # Predict
+                predicted_price = model.predict([pred_vector])[0]
                 avg_price1.at[idx, "Fair_Price"] = predicted_price
-
-            # 9. عرض دقة النموذج
-            y_pred = rf_model.predict(X_test)
-            mae = mean_absolute_error(y_test, y_pred)
-            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-            print(f"✅ ML Model Trained | MAE: {mae:,.0f} EGP | RMSE: {rmse:,.0f} EGP")
-
         except Exception as e:
-            print(f"⚠️ ML Model failed: {e}")
-            # استخدام الطريقة التقليدية كبديل
+            # Fallback
             avg_price1["Fair_Price"] = (
                 avg_price1["Price_Per_M_mean"] * avg_price1["Avg_Area"]
             )
+    else:
+        # Fallback if no model
+        avg_price1["Fair_Price"] = (
+            avg_price1["Price_Per_M_mean"] * avg_price1["Avg_Area"]
+        )
 
-    # 10. حساب Scores (يبقى كما هو)
+    # --- Scoring Logic ---
     price_min = avg_price1["Price_Per_M_mean"].min()
     price_max = avg_price1["Price_Per_M_mean"].max()
-    avg_price1["Price_Score"] = 1 - (
-        (avg_price1["Price_Per_M_mean"] - price_min) / (price_max - price_min)
-    )
+
+    # Avoid division by zero
+    if price_max == price_min:
+        avg_price1["Price_Score"] = 0.5
+    else:
+        avg_price1["Price_Score"] = 1 - (
+            (avg_price1["Price_Per_M_mean"] - price_min) / (price_max - price_min)
+        )
 
     std_min = avg_price1["Price_Std"].min()
     std_max = avg_price1["Price_Std"].max()
-    avg_price1["Stability_Score"] = 1 - (
-        (avg_price1["Price_Std"] - std_min) / (std_max - std_min)
-    )
+
+    if std_max == std_min:
+        avg_price1["Stability_Score"] = 0.5
+    else:
+        avg_price1["Stability_Score"] = 1 - (
+            (avg_price1["Price_Std"] - std_min) / (std_max - std_min)
+        )
 
     count_min = avg_price1["Property_Count"].min()
     count_max = avg_price1["Property_Count"].max()
     area_min = avg_price1["Avg_Area"].min()
     area_max = avg_price1["Avg_Area"].max()
 
-    avg_price1["Area_Score"] = (avg_price1["Avg_Area"] - area_min) / (
-        area_max - area_min
+    avg_price1["Area_Score"] = (
+        (avg_price1["Avg_Area"] - area_min) / (area_max - area_min)
+        if area_max != area_min
+        else 0.5
     )
-    avg_price1["Supply_Score"] = (avg_price1["Property_Count"] - count_min) / (
-        count_max - count_min
+    avg_price1["Supply_Score"] = (
+        (avg_price1["Property_Count"] - count_min) / (count_max - count_min)
+        if count_max != count_min
+        else 0.5
     )
 
-    # 11. Buy Score محسّن
+    # Buy Score Calculation
     avg_price1["Buy_Score"] = (
         avg_price1["Price_Score"] * 0.40
         + avg_price1["Stability_Score"] * 0.25
@@ -308,7 +330,7 @@ def create_treemap_data(filtered_df):
 
     avg_price1["Buy_Score"] = avg_price1["Buy_Score"].clip(0, 100)
 
-    # 12. إضافة Value Score بناءً على Fair Price
+    # Value Score adjustment
     if "Fair_Price" in avg_price1.columns:
         avg_price1["Value_Score"] = avg_price1.apply(
             lambda row: (
@@ -319,7 +341,6 @@ def create_treemap_data(filtered_df):
             axis=1,
         ).clip(0, 100)
 
-        # دمج Value Score مع Buy Score
         avg_price1["Buy_Score"] = (
             avg_price1["Buy_Score"] * 0.7 + avg_price1["Value_Score"] * 0.3
         )
@@ -336,7 +357,6 @@ def create_treemap_data(filtered_df):
 
     avg_price1["Buy_Label"] = avg_price1["Buy_Score"].apply(buy_label)
 
-    # 13. إضافة Recommendation بناءً على Score
     avg_price1["Recommendation"] = avg_price1.apply(
         lambda row: (
             "🏆 Highly Recommended"
@@ -418,7 +438,13 @@ def calculate_area_insights(filtered_df):
     return best_area_text, price_rate_text
 
 
+# --- Main Execution ---
 df = load_data()
+
+# 4. تفعيل تدريب النموذج فور تحميل البيانات
+# هذا السطر يعمل مرة واحدة عند تشغيل السيرفر أو تحميل الكاش
+rf_model, model_features, prop_map = train_model_once(df)
+
 if "last_update" not in st.session_state:
     st.session_state["last_update"] = "Unknown"
 
@@ -467,20 +493,17 @@ with tab1:
     if "Price" in df.columns:
         price_min = int(df["Price"].min())
         price_max = int(df["Price"].max())
-        
-        # تقريب الأرقام لجعلها أقل تعقيداً
-        # مثلاً: إذا كان الرقم 23,400,343 نجعله 23 مليون
-        price_min_simplified = price_min // 1000000  # بالمليون
+
+        price_min_simplified = price_min // 1000000
         price_max_simplified = price_max // 1000000
-        
+
         price_range_simple = st.sidebar.slider(
             "Price Range (Million EGP)",
             price_min_simplified,
             price_max_simplified,
-            (price_min_simplified, price_max_simplified)
+            (price_min_simplified, price_max_simplified),
         )
-        
-        # تحويل للقيمة الحقيقية
+
         price_range = (price_range_simple[0] * 1000000, price_range_simple[1] * 1000000)
     if "Area" in df.columns:
         area_min = int(df["Area"].min())
@@ -528,7 +551,6 @@ with tab1:
     st.subheader("📊 Key Metrics")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         st.metric("Total Properties", len(filtered_df))
         st.markdown("</div>", unsafe_allow_html=True)
@@ -567,18 +589,22 @@ with tab1:
     st.markdown(
         "💡 **معلومة مهمة:** متوسط السعر والمساحة بيعكسوا اختياراتك الحالية. غيّر الفلاتر وشوف إزاي القرار بيتغير."
     )
-    treemap_data = create_treemap_data(filtered_df)
-    if treemap_data["Buy_Label"].value_counts().idxmax() == "سعر عالى 🔴":
-        st.markdown(
-            '<div class="metric-card" style="background: linear-gradient(135deg, #ff4e50 0%, #f9d423 100%);">السوق عالى السعر حاليًا، خليك حذر في اختياراتك!</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            '<div class="metric-card" style="background: linear-gradient(135deg, #43cea2 0%, #185a9d 100%);">السوق مناسب للشراء حاليًا، استغل الفرص!</div>',
-            unsafe_allow_html=True,
-        )
-    # st.write(f"{t["Buy_Label"].value_counts().idxmax()}: {len(filtered_df)} properties")
+
+    # 5. تمرير النموذج المدرب للدالة
+    treemap_data = create_treemap_data(filtered_df, rf_model, model_features, prop_map)
+
+    # Check if empty to avoid errors
+    if not treemap_data.empty:
+        if treemap_data["Buy_Label"].value_counts().idxmax() == "سعر عالى 🔴":
+            st.markdown(
+                '<div class="metric-card" style="background: linear-gradient(135deg, #ff4e50 0%, #f9d423 100%);">السوق عالى السعر حاليًا، خليك حذر في اختياراتك!</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div class="metric-card" style="background: linear-gradient(135deg, #43cea2 0%, #185a9d 100%);">السوق مناسب للشراء حاليًا، استغل الفرص!</div>',
+                unsafe_allow_html=True,
+            )
 
     st.subheader("📈 Analytics")
 
@@ -716,21 +742,21 @@ with tab1:
                 )
                 st.plotly_chart(fig6, use_container_width=True)
     fig12 = px.box(
-            filtered_df,
-            x="Bedrooms",
-            y="Price_Per_M",
-            color="PropertyType",
-            title="Price per m² Distribution by Bedrooms Count",
-        )
+        filtered_df,
+        x="Bedrooms",
+        y="Price_Per_M",
+        color="PropertyType",
+        title="Price per m² Distribution by Bedrooms Count",
+    )
     st.plotly_chart(fig12, use_container_width=True)
 
     fig13 = px.box(
-            filtered_df,
-            x="Bathrooms",
-            y="Price_Per_M",
-            color="PropertyType",
-            title="Price per m² Distribution by Bathrooms Count",
-        )
+        filtered_df,
+        x="Bathrooms",
+        y="Price_Per_M",
+        color="PropertyType",
+        title="Price per m² Distribution by Bathrooms Count",
+    )
     st.plotly_chart(fig13, use_container_width=True)
 
     st.subheader("📋 Property List")
@@ -824,14 +850,17 @@ with tab2:
                     st.write(f"**{area}:** {price:,.0f} EGP/m²")
 
         if not filtered_df.empty:
-            treemap_data = create_treemap_data(filtered_df)
+            # 6. تمرير النموذج المدرب للدالة هنا أيضاً
+            treemap_data = create_treemap_data(
+                filtered_df, rf_model, model_features, prop_map
+            )
+
             fig15 = px.treemap(
                 treemap_data,
                 path=["State", "Location"],
                 values="Price_Per_M_mean",
                 title="Market Distribution Tree Map",
                 color="Buy_Score",
-                # color_continuous_scale=["red", "orange", "yellow", "green"],
                 hover_data={
                     "Price_Per_M_mean": ":.0f",
                     "Avg_Price": ":.0f",
@@ -898,20 +927,15 @@ with tab2:
         BUY_SCORE_TOOLTIP = """
             **إزاي بنحسب Buy Score؟**
 
-            • 💰 **تنافسية السعر (40%)**  
-            قد إيه أسعار المنطقة مناسبة مقارنة بباقي السوق.
+            • 💰 **تنافسية السعر (40%)** قد إيه أسعار المنطقة مناسبة مقارنة بباقي السوق.
 
-            • 📈 **استقرار السوق (25%)**  
-            كل ما تذبذب الأسعار أقل، كل ما المخاطرة أقل.
+            • 📈 **استقرار السوق (25%)** كل ما تذبذب الأسعار أقل، كل ما المخاطرة أقل.
 
-            • 🏠 **مستوى المعروض (20%)**  
-            كل ما عدد العقارات المتاحة أكبر، فرص التفاوض بتكون أفضل.
+            • 🏠 **مستوى المعروض (20%)** كل ما عدد العقارات المتاحة أكبر، فرص التفاوض بتكون أفضل.
 
-            • 📐 **قيمة المساحة (15%)**  
-            المناطق ذات المساحات المتوسطة والكبيرة بتحتفظ بقيمتها على المدى الطويل.
+            • 📐 **قيمة المساحة (15%)** المناطق ذات المساحات المتوسطة والكبيرة بتحتفظ بقيمتها على المدى الطويل.
 
-            • ⚖️ **تعديل السعر العادل (Fair Price)**  
-            الدرجة النهائية بتتعدل حسب قرب السعر الفعلي من السعر العادل المتوقع.
+            • ⚖️ **تعديل السعر العادل (Fair Price)** الدرجة النهائية بتتعدل حسب قرب السعر الفعلي من السعر العادل المتوقع.
 
             **تفسير الدرجات:**
             🟢 **80 – 100** → فرصة شراء ممتازة  
@@ -938,7 +962,6 @@ with tab2:
                 st.info("🟠 السوق عادل حاليًا – قارن بين الخيارات بحذر.")
             else:
                 st.error("🔴 الأسعار مرتفعة – يُفضَّل الانتظار أو التفاوض بقوة.")
-
 
         with col2:
             st.markdown("### ℹ️ Buy Score Explanation")
@@ -1001,7 +1024,7 @@ if not df.empty:
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔄 Auto-Update Status")
 st.sidebar.info(
-    f"**Last Update:** {st.session_state.get('last_update', 'Checking...')}\n\n**Properties:** {len(df):,}\n**AI Features:** Enabled\n**Next Update:** 4:00 AM Egypt Time"
+    f"**Last Update:** {st.session_state.get('last_update', 'Checking...')}\n\n**Properties:** {len(df):,}\n**AI Features:** Enabled (Cached)\n**Next Update:** 4:00 AM Egypt Time"
 )
 
 st.sidebar.markdown("---")
