@@ -2,7 +2,7 @@ name: Daily Real Estate Scraping
 
 on:
   schedule:
-    - cron: '30 2 * * *'  # 2:30 AM UTC = 4:30 AM Egypt Time
+    - cron: '0 22 * * *'  # 10:00 PM UTC = 12:00 AM Egypt Time (منتصف الليل)
   workflow_dispatch:
     inputs:
       test_mode:
@@ -26,8 +26,15 @@ jobs:
       uses: actions/checkout@v3
       with:
         token: ${{ secrets.GH_TOKEN }}
-        fetch-depth: 0  # احضر كل التاريخ
+        fetch-depth: 0
     
+    - name: Set timezone info
+      run: |
+        echo "🌍 Timezone Information:"
+        echo "Scheduled time: 22:00 UTC"
+        echo "Egypt time (UTC+2): 00:00 (midnight)"
+        date
+        
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
@@ -41,18 +48,27 @@ jobs:
     - name: Backup current data
       run: |
         if [ -f "Final1.csv" ]; then
-          cp Final1.csv Final1_backup_$(date +%Y%m%d_%H%M%S).csv
-          echo "✅ Backup created"
+          BACKUP_NAME="Final1_backup_$(date +%Y%m%d_%H%M%S).csv"
+          cp Final1.csv "$BACKUP_NAME"
+          echo "✅ Backup created: $BACKUP_NAME"
         fi
         
     - name: Run scraping script
+      env:
+        SCRAPE_TIME: "midnight"
       run: |
+        echo "⏰ Running at midnight Egypt time (22:00 UTC)"
         if [ "${{ github.event.inputs.test_mode }}" = "yes" ]; then
-          echo "🔧 Running in TEST mode (2 pages)"
+          echo "🔧 Running in TEST mode (2 pages only)"
           python -c "
-          import scrape_data
-          # تعديل لجمع صفحتين فقط
-          " || echo "Test completed"
+          import sys
+          sys.path.append('.')
+          try:
+              import scrape_data
+              print('Test import successful')
+          except Exception as e:
+              print(f'Error: {e}')
+          "
         else
           echo "🚀 Running in PRODUCTION mode"
           python scrape_data.py
@@ -67,8 +83,11 @@ jobs:
           # تحقق من فقدان البيانات
           if grep -q "Net change: -[0-9]*[1-9]" scraping_metadata.txt; then
             echo "⚠️ WARNING: Data loss detected!"
-            echo "Restoring from backup..."
-            ls -la Final1_backup_*.csv | tail -1 | awk '{print $9}' | xargs -I {} cp {} Final1.csv
+            LATEST_BACKUP=$(ls -t Final1_backup_*.csv | head -1)
+            if [ -f "$LATEST_BACKUP" ]; then
+              echo "Restoring from backup: $LATEST_BACKUP"
+              cp "$LATEST_BACKUP" Final1.csv
+            fi
           fi
         fi
         
@@ -89,17 +108,17 @@ jobs:
           
           # احصل على معلومات من metadata
           if [ -f "scraping_metadata.txt" ]; then
-            NEW_PROPS=$(grep "New properties added:" scraping_metadata.txt | awk '{print $NF}')
-            TOTAL_PROPS=$(grep "Total properties:" scraping_metadata.txt | awk '{print $NF}')
-            COMMIT_MSG="Auto-scrape: Added $NEW_PROPS properties (Total: $TOTAL_PROPS) [$(date +'%Y-%m-%d %H:%M')]"
+            NEW_PROPS=$(grep "New properties added:" scraping_metadata.txt | awk '{print $NF}' || echo "0")
+            TOTAL_PROPS=$(grep "Total properties:" scraping_metadata.txt | awk '{print $NF}' || echo "0")
+            COMMIT_MSG="🌙 Midnight Update: Added $NEW_PROPS properties (Total: $TOTAL_PROPS) [$(date +'%Y-%m-%d %H:%M EET')]"
           else
-            COMMIT_MSG="Auto-scrape: Update data [$(date +'%Y-%m-%d %H:%M')]"
+            COMMIT_MSG="🌙 Midnight Update: Data refresh [$(date +'%Y-%m-%d %H:%M EET')]"
           fi
           
           git commit -m "$COMMIT_MSG"
           
-          # pull أولاً
-          git pull origin main --rebase --strategy-option=theirs
+          # pull أولاً لتجنب التعارضات
+          git pull origin main --rebase --strategy-option=theirs || true
           
           # push
           if git push origin main; then
@@ -112,14 +131,22 @@ jobs:
           echo "✅ No changes to commit"
         fi
         
-    - name: Cleanup backups
+    - name: Cleanup old backups
       run: |
-        # حذف النسخ الاحتياطية القديمة (احتفظ بـ 5 أحدث)
-        ls -t Final1_backup_*.csv 2>/dev/null | tail -n +6 | xargs rm -f || true
+        # حذف النسخ الاحتياطية القديمة (احتفظ بـ 7 أحدث فقط)
+        BACKUP_COUNT=$(ls -1 Final1_backup_*.csv 2>/dev/null | wc -l)
+        if [ $BACKUP_COUNT -gt 7 ]; then
+          ls -t Final1_backup_*.csv | tail -n +8 | xargs rm -f
+          echo "🧹 Cleaned old backups, keeping 7 latest"
+        else
+          echo "📦 Keeping all backups ($BACKUP_COUNT files)"
+        fi
         
     - name: Create summary
       run: |
-        echo "### 🎉 Scraping Completed" >> $GITHUB_STEP_SUMMARY
+        echo "### 🌙 Midnight Scraping Completed" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Scheduled:** 22:00 UTC (00:00 Egypt Time)" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
         if [ -f "scraping_metadata.txt" ]; then
@@ -128,5 +155,8 @@ jobs:
           cat scraping_metadata.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
         else
-          echo "**Status:** No new data collected" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** No new data collected or scraping failed" >> $GITHUB_STEP_SUMMARY
         fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Next run:** Tomorrow at 22:00 UTC (00:00 Egypt Time)" >> $GITHUB_STEP_SUMMARY
