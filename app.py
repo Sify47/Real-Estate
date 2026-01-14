@@ -1240,7 +1240,7 @@ if not df.empty:
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔄 Auto-Update Status")
 st.sidebar.info(
-    f"**Last Update:** {st.session_state.get('last_update', 'Checking...')}\n\n**Properties:** {len(df):,}\n**AI Features:** Enabled (Cached)\n**Next Update:** 4:00 AM Egypt Time"
+    f"**Last Update:** {st.session_state.get('last_update', 'Checking...')}\n\n**Properties:** {len(df):,}\n**AI Features:** Enabled (Cached)\n**Next Update:** 12:00 AM Egypt Time"
 )
 
 st.sidebar.markdown("---")
