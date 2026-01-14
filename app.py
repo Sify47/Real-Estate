@@ -467,9 +467,21 @@ with tab1:
     if "Price" in df.columns:
         price_min = int(df["Price"].min())
         price_max = int(df["Price"].max())
-        price_range = st.sidebar.slider(
-            "Price Range (EGP)", price_min, price_max, (price_min, price_max)
+        
+        # تقريب الأرقام لجعلها أقل تعقيداً
+        # مثلاً: إذا كان الرقم 23,400,343 نجعله 23 مليون
+        price_min_simplified = price_min // 1000000  # بالمليون
+        price_max_simplified = price_max // 1000000
+        
+        price_range_simple = st.sidebar.slider(
+            "Price Range (Million EGP)",
+            price_min_simplified,
+            price_max_simplified,
+            (price_min_simplified, price_max_simplified)
         )
+        
+        # تحويل للقيمة الحقيقية
+        price_range = (price_range_simple[0] * 1000000, price_range_simple[1] * 1000000)
     if "Area" in df.columns:
         area_min = int(df["Area"].min())
         area_max = int(df["Area"].max())
