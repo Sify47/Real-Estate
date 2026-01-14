@@ -1,3 +1,4 @@
+from sklearn.preprocessing import normalize
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -99,15 +100,94 @@ def load_data():
         return pd.DataFrame()
 
 
-# --- 2. تدريب النموذج (مرة واحدة فقط) ---
+import streamlit as st
+import pandas as pd
+
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error
+
+
+@st.cache_data
+def load_area_intelligence():
+    """
+    تحميل جدول ذكاء المناطق (مرة واحدة)
+    """
+    try:
+        return pd.read_csv("state.csv")
+    except:
+        # بيانات افتراضية إذا لم يتم العثور على الملف
+        st.sidebar.warning("⚠️ ملف state.csv غير موجود، سيتم استخدام بيانات افتراضية")
+        return pd.DataFrame(
+            {
+                "Area": ["Sporting", "Smouha", "Maadi", "New Cairo"],
+                "Near_Sea": [1, 0, 0, 0],
+                "Schools_Quality": [4, 5, 4, 5],
+                "Services_Level": [4, 5, 4, 5],
+                "Transportation": [4, 4, 4, 3],
+                "Investment_Potential": [4, 5, 4, 5],
+                "Resale_Liquidity": [4, 5, 4, 5],
+                "Area_Score": [78, 92, 80, 90],
+                "Category": ["Upper-Middle", "High-End", "Upper-Middle", "High-End"],
+                "Key_Insights": [
+                    "Classic area, stable pricing",
+                    "Elite schools, club proximity",
+                    "Family area, good schools",
+                    "Modern compounds, high demand",
+                ],
+            }
+        )
+
+
+def enrich_with_area_features(df, area_df):
+    """
+    ربط بيانات العقارات بخصائص المنطقة - تم التصحيح
+    """
+    df = df.copy()
+
+    if "Location" not in df.columns or area_df.empty:
+        return df
+
+    # التصحيح: استخدام Location بدل State للربط
+    df = df.merge(area_df, left_on="State", right_on="Area_Name", how="left")
+
+    area_numeric_cols = [
+        "Near_Sea",
+        "Schools_Quality",
+        "Services_Level",
+        "Transportation",
+        "Investment_Potential",
+        "Resale_Liquidity",
+        "Area_Score",
+    ]
+
+    for col in area_numeric_cols:
+        if col in df.columns:
+            df[col] = df[col].fillna(df[col].median())
+        else:
+            # قيم افتراضية إذا لم تكن الأعمدة موجودة
+            if col == "Area_Score":
+                df[col] = 70  # متوسط افتراضي
+            elif col == "Near_Sea":
+                df[col] = 0
+            else:
+                df[col] = 3
+
+    return df
+
+
 @st.cache_resource
 def train_model_once(df):
     """
-    تدريب النموذج مرة واحدة وحفظه في الذاكرة لتسريع التطبيق.
+    تدريب النموذج مرة واحدة مع دمج ذكاء المناطق
     """
     ml_df = df.copy()
 
-    # Preprocessing
+    # ===== Load & Merge Area Intelligence =====
+    area_df = load_area_intelligence()
+    ml_df = enrich_with_area_features(ml_df, area_df)
+
+    # ===== Payment Method Encoding =====
     if "Payment_Method" in ml_df.columns:
         ml_df["Payment_Code"] = (
             ml_df["Payment_Method"]
@@ -115,13 +195,14 @@ def train_model_once(df):
             .fillna(0)
         )
 
+    # ===== Property Type Encoding =====
     property_map = {}
     if "PropertyType" in ml_df.columns:
-        property_types = ml_df["PropertyType"].unique()
+        property_types = ml_df["PropertyType"].dropna().unique()
         property_map = {pt: i for i, pt in enumerate(property_types)}
         ml_df["PropertyType_Code"] = ml_df["PropertyType"].map(property_map)
 
-    # تحديد الميزات
+    # ===== Feature Selection =====
     numeric_features = []
     candidates = [
         "Area",
@@ -131,14 +212,25 @@ def train_model_once(df):
         "Down_Payment",
         "Payment_Code",
         "PropertyType_Code",
+        # Area Intelligence
+        "Near_Sea",
+        "Schools_Quality",
+        "Services_Level",
+        "Transportation",
+        "Investment_Potential",
+        "Resale_Liquidity",
+        "Area_Score",
     ]
+
     for col in candidates:
         if col in ml_df.columns:
             numeric_features.append(col)
 
     ml_df = ml_df[numeric_features + ["Price"]].dropna()
 
+    # حماية من Data قليلة
     if len(ml_df) < 50:
+        st.sidebar.warning("⚠️ بيانات غير كافية لتدريب النموذج")
         return None, [], {}
 
     X = ml_df[numeric_features]
@@ -149,20 +241,23 @@ def train_model_once(df):
             X, y, test_size=0.2, random_state=45
         )
 
-        # زيادة الدقة قليلاً لأن التدريب يحصل مرة واحدة
         rf_model = RandomForestRegressor(
             n_estimators=150, max_depth=20, random_state=47, n_jobs=-1
         )
         rf_model.fit(X_train, y_train)
 
-        # حساب مقاييس الأداء للعرض (اختياري)
+        # ===== Evaluation =====
         y_pred = rf_model.predict(X_test)
         mae = mean_absolute_error(y_test, y_pred)
-        # يمكن حفظ mae في session_state إذا أردت عرضه
+
+        # حفظ في session state
+        st.session_state["model_mae"] = round(mae, 2)
+        # st.sidebar.success(f"✅ النموذج مدرب (خطأ متوسط: {mae:,.0f} EGP)")
 
         return rf_model, numeric_features, property_map
+
     except Exception as e:
-        print(f"ML Training Error: {e}")
+        st.sidebar.error(f"❌ خطأ في التدريب: {str(e)[:100]}")
         return None, [], {}
 
 
@@ -197,8 +292,20 @@ def calculate_market_insights(df):
     return insights
 
 
-# --- 3. دالة Treemap المعدلة (تستخدم النموذج الجاهز) ---
+# --- دالة التطبيع المحلية ---
+def normalize_series(series):
+    """دالة تطبيع محلية بديلة عن sklearn.preprocessing.normalize"""
+    if series.max() == series.min():
+        return 0.5
+    return (series - series.min()) / (series.max() - series.min())
+
+
+# --- 3. دالة Treemap المعدلة مع Buy_Score المحسن ---
 def create_treemap_data(filtered_df, model, features, prop_map):
+    # دمج بيانات المنطقة أولاً
+    area_df = load_area_intelligence()
+    filtered_df = enrich_with_area_features(filtered_df, area_df)
+
     # Aggregations
     avg_price1 = (
         filtered_df.groupby(["State", "Location"])["Price_Per_M"].mean().reset_index()
@@ -234,7 +341,7 @@ def create_treemap_data(filtered_df, model, features, prop_map):
             "Price_mean": "Avg_Price",
             "Area_mean": "Avg_Area",
             "Price_Per_M_count": "Property_Count",
-            "Price_Per_M_std": "Price_Std",  # Note: Adjusted name mapping
+            "Price_Per_M_std": "Price_Std",
         }
     )
 
@@ -245,10 +352,63 @@ def create_treemap_data(filtered_df, model, features, prop_map):
     # Fill NaN Std with 0 for single properties
     avg_price1["Price_Std"] = avg_price1["Price_Std"].fillna(0)
 
-    # --- Prediction Logic using Cached Model ---
+    # ===== حساب نقاط المنطقة من state.csv =====
+    # أولاً نجمع بيانات المنطقة لكل موقع
+    area_stats = (
+        filtered_df.groupby(["State", "Location"])
+        .agg(
+            {
+                "Area_Score": "mean",
+                "Investment_Potential": "mean",
+                "Resale_Liquidity": "mean",
+                "Schools_Quality": "mean",
+                "Services_Level": "mean",
+                "Transportation": "mean",
+                "Near_Sea": "mean",
+            }
+        )
+        .reset_index()
+    )
+
+    # دمج مع avg_price1
+    avg_price1 = avg_price1.merge(area_stats, on=["State", "Location"], how="left")
+
+    # حساب Area Intelligence Score
+    def calculate_area_intelligence(row):
+        scores = []
+        weights = []
+
+        if pd.notna(row.get("Area_Score")):
+            scores.append(row["Area_Score"] / 100)  # تحويل من 0-100 إلى 0-1
+            weights.append(0.4)
+
+        if pd.notna(row.get("Investment_Potential")):
+            scores.append(row["Investment_Potential"] / 5)  # تحويل من 0-5 إلى 0-1
+            weights.append(0.3)
+
+        if pd.notna(row.get("Resale_Liquidity")):
+            scores.append(row["Resale_Liquidity"] / 5)  # تحويل من 0-5 إلى 0-1
+            weights.append(0.2)
+
+        if pd.notna(row.get("Schools_Quality")):
+            scores.append(row["Schools_Quality"] / 5)  # تحويل من 0-5 إلى 0-1
+            weights.append(0.1)
+
+        if scores and weights:
+            # حساب المتوسط المرجح
+            weighted_sum = sum(s * w for s, w in zip(scores, weights))
+            total_weight = sum(weights)
+            return weighted_sum / total_weight
+        return 0.5  # قيمة افتراضية
+
+    avg_price1["Area_Intelligence_Score"] = avg_price1.apply(
+        calculate_area_intelligence, axis=1
+    )
+
+    # ===== Prediction Logic using Cached Model =====
     if model is not None and features:
         try:
-            # Prepare batch input for efficiency could be better, but iterrows is fine for small location counts
+            fair_prices = []
             for idx, row in avg_price1.iterrows():
                 # Create input vector matching training features
                 input_data = {
@@ -258,9 +418,15 @@ def create_treemap_data(filtered_df, model, features, prop_map):
                     "Price_Per_M": row["Price_Per_M_mean"],
                     "Down_Payment": 0,
                     "Payment_Code": 0,  # Cash assumption
-                    "PropertyType_Code": prop_map.get(
-                        "Apartment", 0
-                    ),  # Default type assumption
+                    "PropertyType_Code": prop_map.get("Apartment", 0),
+                    # Area Intelligence features
+                    "Near_Sea": row.get("Near_Sea", 0),
+                    "Schools_Quality": row.get("Schools_Quality", 3),
+                    "Services_Level": row.get("Services_Level", 3),
+                    "Transportation": row.get("Transportation", 3),
+                    "Investment_Potential": row.get("Investment_Potential", 3),
+                    "Resale_Liquidity": row.get("Resale_Liquidity", 3),
+                    "Area_Score": row.get("Area_Score", 70),
                 }
 
                 # Align columns
@@ -270,19 +436,20 @@ def create_treemap_data(filtered_df, model, features, prop_map):
 
                 # Predict
                 predicted_price = model.predict([pred_vector])[0]
-                avg_price1.at[idx, "Fair_Price"] = predicted_price
+                fair_prices.append(predicted_price)
+
+            avg_price1["Fair_Price"] = fair_prices
         except Exception as e:
-            # Fallback
+            st.sidebar.error(f"❌ خطأ في حساب Fair Price: {str(e)[:100]}")
             avg_price1["Fair_Price"] = (
                 avg_price1["Price_Per_M_mean"] * avg_price1["Avg_Area"]
             )
     else:
-        # Fallback if no model
         avg_price1["Fair_Price"] = (
             avg_price1["Price_Per_M_mean"] * avg_price1["Avg_Area"]
         )
 
-    # --- Scoring Logic ---
+    # ===== Scoring Logic مع Buy_Score المحسن =====
     price_min = avg_price1["Price_Per_M_mean"].min()
     price_max = avg_price1["Price_Per_M_mean"].max()
 
@@ -309,7 +476,7 @@ def create_treemap_data(filtered_df, model, features, prop_map):
     area_min = avg_price1["Avg_Area"].min()
     area_max = avg_price1["Avg_Area"].max()
 
-    avg_price1["Area_Score"] = (
+    avg_price1["Area_Size_Score"] = (
         (avg_price1["Avg_Area"] - area_min) / (area_max - area_min)
         if area_max != area_min
         else 0.5
@@ -320,17 +487,20 @@ def create_treemap_data(filtered_df, model, features, prop_map):
         else 0.5
     )
 
-    # Buy Score Calculation
+    # ===== Buy Score Calculation المحسن =====
+    # الأوزان الجديدة:
+    # 30% للسعر، 20% للاستقرار، 15% للمعروض، 10% للمساحة، 25% لذكاء المنطقة
     avg_price1["Buy_Score"] = (
-        avg_price1["Price_Score"] * 0.40
-        + avg_price1["Stability_Score"] * 0.25
-        + avg_price1["Supply_Score"] * 0.20
-        + avg_price1["Area_Score"] * 0.15
+        avg_price1["Price_Score"] * 0.30
+        + avg_price1["Stability_Score"] * 0.20
+        + avg_price1["Supply_Score"] * 0.15
+        + avg_price1["Area_Size_Score"] * 0.10
+        + avg_price1["Area_Intelligence_Score"] * 0.25
     ) * 100
 
     avg_price1["Buy_Score"] = avg_price1["Buy_Score"].clip(0, 100)
 
-    # Value Score adjustment
+    # ===== Value Score adjustment =====
     if "Fair_Price" in avg_price1.columns:
         avg_price1["Value_Score"] = avg_price1.apply(
             lambda row: (
@@ -341,30 +511,32 @@ def create_treemap_data(filtered_df, model, features, prop_map):
             axis=1,
         ).clip(0, 100)
 
+        # دمج Value Score مع Buy Score (70% Buy Score, 30% Value Score)
         avg_price1["Buy_Score"] = (
             avg_price1["Buy_Score"] * 0.7 + avg_price1["Value_Score"] * 0.3
-        )
+        ).clip(0, 100)
 
+    # ===== التصنيف والتوصيات =====
     def buy_label(score):
         if score >= 80:
-            return " فرصة شراء ممتازة 🟢"
+            return "🟢 فرصة شراء ممتازة"
         elif score >= 65:
-            return "خيار جيد 🟡"
+            return "🟡 خيار جيد"
         elif score >= 50:
-            return "كويس 🟠"
+            return "🟠 متوسط - يحتاج تفاوض"
         else:
-            return "سعر عالى 🔴"
+            return "🔴 سعر مرتفع"
 
     avg_price1["Buy_Label"] = avg_price1["Buy_Score"].apply(buy_label)
 
     avg_price1["Recommendation"] = avg_price1.apply(
         lambda row: (
-            "🏆 Highly Recommended"
+            "🏆 موصى به بشدة"
             if row["Buy_Score"] >= 80
             else (
-                "👍 Good Value"
+                "👍 جيد"
                 if row["Buy_Score"] >= 65
-                else "🤔 Consider" if row["Buy_Score"] >= 50 else "⚠️ Overpriced"
+                else "🤔 متوسط" if row["Buy_Score"] >= 50 else "⚠️ غير موصى به"
             )
         ),
         axis=1,
@@ -454,7 +626,7 @@ st.markdown(
 )
 
 tab1, tab2 = st.tabs(["📊 Dashboard", "📈 Market Insights"])
-view = ["Sea", "Club", "Street"]
+view = ["Sea", "Club", "Street" , "Garden", "Pool", "Lake"]
 
 with tab1:
     st.sidebar.header("🔍 Filters")
@@ -595,7 +767,7 @@ with tab1:
 
     # Check if empty to avoid errors
     if not treemap_data.empty:
-        if treemap_data["Buy_Label"].value_counts().idxmax() == "سعر عالى 🔴":
+        if treemap_data["Buy_Label"].value_counts().idxmax() == "🔴 سعر مرتفع":
             st.markdown(
                 '<div class="metric-card" style="background: linear-gradient(135deg, #ff4e50 0%, #f9d423 100%);">السوق عالى السعر حاليًا، خليك حذر في اختياراتك!</div>',
                 unsafe_allow_html=True,
@@ -850,16 +1022,14 @@ with tab2:
                     st.write(f"**{area}:** {price:,.0f} EGP/m²")
 
         if not filtered_df.empty:
-            # 6. تمرير النموذج المدرب للدالة هنا أيضاً
-            treemap_data = create_treemap_data(
-                filtered_df, rf_model, model_features, prop_map
-            )
+            # تمرير النموذج المدرب للدالة
+            treemap_data = create_treemap_data(filtered_df, rf_model, model_features, prop_map)
 
             fig15 = px.treemap(
                 treemap_data,
                 path=["State", "Location"],
                 values="Price_Per_M_mean",
-                title="Market Distribution Tree Map",
+                title="Market Distribution Tree Map مع تقييم المناطق",
                 color="Buy_Score",
                 hover_data={
                     "Price_Per_M_mean": ":.0f",
@@ -867,6 +1037,8 @@ with tab2:
                     "Avg_Area": ":.0f",
                     "Property_Count": True,
                     "Price_Std": ":.0f",
+                    "Area_Score": ":.0f",  # إضافة
+                    "Investment_Potential": ":.1f",  # إضافة
                 },
                 custom_data=[
                     "Price_Per_M_mean",
@@ -877,17 +1049,50 @@ with tab2:
                     "Fair_Price",
                     "Buy_Score",
                     "Buy_Label",
+                    "Area_Score",  # إضافة
+                    "Investment_Potential",  # إضافة
+                    "Resale_Liquidity",  # إضافة
+                    "Schools_Quality",  # إضافة
+                    "Area_Intelligence_Score",  # إضافة
                 ],
+                # color_continuous_scale="RdYlGn",  # من الأحمر للأخضر
             )
-            fig15.update_traces(
-                hovertemplate="<b>%{label}</b><br>-------------------<br>📊 <b>Avg Price/m²:</b> %{customdata[0]:,.0f} EGP<br>💰 <b>Avg Total Price:</b> %{customdata[1]:,.0f} EGP<br>📐 <b>Avg Area:</b> %{customdata[2]:,.0f} m²<br>🏠 <b>Properties Count:</b> %{customdata[3]:,.0f}<br>📈 <b>Price Std Dev:</b> %{customdata[4]:,.0f} EGP<br>%{customdata[5]:,.0f} EGP <b>Fair Price</b><br>%{customdata[6]:.2f} <b>Buy Score</b><br>%{customdata[7]}<br>-------------------<br><i>Click to zoom in/out</i>"
-            )
-            fig15.update_layout(
-                margin=dict(t=40, l=25, r=25, b=20),
-                coloraxis_colorbar=dict(title="Buy_Score", thickness=20, len=0.75),
-            )
-            st.plotly_chart(fig15, use_container_width=True)
 
+            # تحسين hover template
+            fig15.update_traces(
+                hovertemplate="<b>%{label}</b><br>" +
+                             "📍 <b>المنطقه:</b> %{parent}<br>" +
+                             "-------------------<br>" +
+                             "💰 <b>متوسط سعر المتر:</b> %{customdata[0]:,.0f} EGP<br>" +
+                             "🏠 <b>متوسط السعر الكلي:</b> %{customdata[1]:,.0f} EGP<br>" +
+                             "📐 <b>متوسط المساحة:</b> %{customdata[2]:,.0f} m²<br>" +
+                             "📊 <b>عدد العقارات:</b> %{customdata[3]:,.0f}<br>" +
+                             "📈 <b>تذبذب الأسعار:</b> %{customdata[4]:,.0f} EGP<br>" +
+                             "⚖️ <b>السعر العادل:</b> %{customdata[5]:,.0f} EGP<br>" +
+                             "🏷️ <b>نقاط الشراء:</b> %{customdata[6]:.1f}/100<br>" +
+                             "📋 <b>التقييم:</b> %{customdata[7]}<br>" +
+                             "-------------------<br>" +
+                             "<b>تقييم المنطقة:</b><br>" +
+                             "• ⭐ <b>التقييم العام:</b> %{customdata[8]:.0f}/100<br>" +
+                             "• 📈 <b>الإمكانيات الاستثمارية:</b> %{customdata[9]:.0f}/5<br>" +
+                             "• 💱 <b>سيولة إعادة البيع:</b> %{customdata[10]:.0f}/5<br>" +
+                             "• 🎓 <b>جودة المدارس:</b> %{customdata[11]:.0f}/5<br>" +
+                             "<i>انقر للتكبير/التصغير</i>"
+            )
+
+            fig15.update_layout(
+                margin=dict(t=50, l=25, r=25, b=20),
+                coloraxis_colorbar=dict(
+                    title="نقاط الشراء<br>(Buy Score)",
+                    thickness=20,
+                    len=0.75,
+                    tickvals=[0, 25, 50, 65, 80, 100],
+                    ticktext=["ضعيف", "سيء", "متوسط", "جيد", "ممتاز", "مثالي"]
+                ),
+                coloraxis_colorbar_title_side="right",
+            )
+
+            st.plotly_chart(fig15, use_container_width=True)
         recommendations = get_purchase_recommendations(filtered_df)
         st.success(f"### ✅ توصيات الشراء:\n{"\n".join(recommendations)}")
 
@@ -927,22 +1132,33 @@ with tab2:
         BUY_SCORE_TOOLTIP = """
             **إزاي بنحسب Buy Score؟**
 
-            • 💰 **تنافسية السعر (40%)** قد إيه أسعار المنطقة مناسبة مقارنة بباقي السوق.
+            • 🏙️ **جودة المنطقة (25%)** - تشمل:
+            - قرب المنطقة من البحر (Near_Sea)
+            - جودة المدارس (Schools_Quality)
+            - مستوى الخدمات (Services_Level)
+            - كفاءة المواصلات (Transportation)
+            - الإمكانيات الاستثمارية (Investment_Potential)
+            - سيولة إعادة البيع (Resale_Liquidity)
+            - التقييم العام للمنطقة (Area_Score)
 
-            • 📈 **استقرار السوق (25%)** كل ما تذبذب الأسعار أقل، كل ما المخاطرة أقل.
+            • 💰 **تنافسية السعر (30%)** - قد إيه أسعار المنطقة مناسبة مقارنة بباقي السوق.
 
-            • 🏠 **مستوى المعروض (20%)** كل ما عدد العقارات المتاحة أكبر، فرص التفاوض بتكون أفضل.
+            • 📈 **استقرار السوق (20%)** - كل ما تذبذب الأسعار أقل، كل ما المخاطرة أقل.
 
-            • 📐 **قيمة المساحة (15%)** المناطق ذات المساحات المتوسطة والكبيرة بتحتفظ بقيمتها على المدى الطويل.
+            • 🏠 **مستوى المعروض (15%)** - كل ما عدد العقارات المتاحة أكبر، فرص التفاوض بتكون أفضل.
 
-            • ⚖️ **تعديل السعر العادل (Fair Price)** الدرجة النهائية بتتعدل حسب قرب السعر الفعلي من السعر العادل المتوقع.
+            • 📐 **قيمة المساحة (10%)** - المناطق ذات المساحات المتوسطة والكبيرة بتحتفظ بقيمتها.
+
+            • ⚖️ **تعديل السعر العادل (30% من الدرجة النهائية)** - مقارنة السعر الحالي بالسعر العادل المتوقع من النموذج.
 
             **تفسير الدرجات:**
-            🟢 **80 – 100** → فرصة شراء ممتازة  
-            🟡 **65 – 79** → خيار جيد (يفضل التفاوض)  
-            🟠 **50 – 64** → سعر عادل  
-            🔴 **أقل من 50** → السعر مرتفع مقارنة بالسوق
-            """
+            🟢 **80 – 100** → فرصة شراء ممتازة (منطقة ممتازة + سعر مناسب)  
+            🟡 **65 – 79** → خيار جيد (يفضل التفاوض للحصول على سعر أفضل)  
+            🟠 **50 – 64** → سعر عادل (منطقة متوسطة أو سعر معقول)  
+            🔴 **أقل من 50** → السعر مرتفع مقارنة بجودة المنطقة والسوق
+
+            **ملاحظة:** النظام بيستخدم بيانات كل **State** (محافظة/مدينة) مش مجرد Location، علشان نديك تقييم أشمل للمنطقة.
+        """
 
         st.subheader("🏷️ Buy Recommendation")
 
