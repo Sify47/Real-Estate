@@ -303,12 +303,19 @@ def clean_data_step1(df_clean):
         df_clean.loc[mask_state, "State"] = df_clean.loc[
             mask_state, "State"
         ].str.replace("Smoha", "Smouha", case=False, regex=False)
+        df_clean.loc[mask_state, "State"] = df_clean.loc[
+            mask_state, "State"
+        ].str.replace("Alex West", "Agami", case=False, regex=False)
 
     if "Location" in df_clean.columns:
         mask_loc = df_clean["Location"].notna()
         df_clean.loc[mask_loc, "Location"] = df_clean.loc[
             mask_loc, "Location"
         ].str.replace("Smoha", "Smouha", case=False, regex=False)
+        df.loc[mask_loc, "Location"] = df.loc[
+                    mask_loc, "Location"
+                ].str.replace("Palm Hills Alexandria", "Palm Hills", case=False, regex=False)
+        df.loc[df["Location"] == "Palm Hills", "State"] = "Palm Hills"
     df_clean["State"] = df_clean["State"].str.strip()
     mask = df_clean["State"].str.contains("Alexandria", case=False, na=False)
     df_clean.loc[mask, "State"] = df_clean.loc[mask, "Location"]
