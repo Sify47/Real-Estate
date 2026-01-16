@@ -321,8 +321,8 @@ def clean_data_step1(df_clean):
         df_clean.loc[mask_loc, "Location"] = df_clean.loc[
                     mask_loc, "Location"
                 ].str.replace("Borg al-Arab", "Borg El Arab", case=False, regex=False)
-        df_clean.loc[df["Location"] == "Palm Hills", "State"] = "Palm Hills"
-        df_clean.loc[df["Location"] == "Alex West", "State"] = "Agami"
+        df_clean.loc[df_clean["Location"] == "Palm Hills", "State"] = "Palm Hills"
+        df_clean.loc[df_clean["Location"] == "Alex West", "State"] = "Agami"
     df_clean["State"] = df_clean["State"].str.strip()
     mask = df_clean["State"].str.contains("Alexandria", case=False, na=False)
     mask1 = df_clean["State"].str.contains("Hay Sharq", case=False, na=False)
@@ -577,8 +577,8 @@ def main():
     )
     bayut_url = "https://www.bayut.eg/en/alexandria/properties-for-sale/"
 
-    propertyfinder_pages = 40
-    bayut_pages = 40
+    propertyfinder_pages = 100
+    bayut_pages = 100
     output_path = "Final1.csv"
 
     # جمع البيانات من PropertyFinder
